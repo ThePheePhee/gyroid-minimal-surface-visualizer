@@ -1,8 +1,9 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { buildRibbonGeometry, generateGyroidWeaves, type WeavePreset, type WeaveRenderStyle } from '../math/weaveCurves';
-import type { SurfaceSettings } from '../rendering/geometryCache';
+import type { ScalarField } from '../math/scalarFields';
+import { buildRibbonGeometry, generateSurfaceWeaves, type WeavePreset, type WeaveRenderStyle } from '../math/weaveCurves';
+import { buildMorphedField, type SurfaceSettings } from '../rendering/geometryCache';
 import { createRibbonMaterial } from '../rendering/ribbonMaterial';
 import { TpmsPreviewSurface } from './TpmsPreviewSurface';
 
@@ -23,51 +24,35 @@ interface SurfaceWeavesProps {
   fiberDensity: number;
   autoRotationSpeed: number;
   breathing: number;
-  cropRadius: number;
-  frequency: number;
-  isoLevel: number;
+  settings: SurfaceSettings;
 }
 
 export function SurfaceWeaves(props: SurfaceWeavesProps) {
   const groupRef = useRef<THREE.Group>(null);
   const { camera } = useThree();
+  const field = useMemo(() => buildMorphedField(props.settings), [props.settings]);
   const strands = useMemo(
     () =>
-      generateGyroidWeaves({
+      generateSurfaceWeaves({
+        field,
         strandCount: props.strandCount,
         strandSpacing: props.strandSpacing,
         integrationLength: props.integrationLength,
         seedPattern: props.seedPattern,
-        frequency: props.frequency,
-        isoLevel: props.isoLevel,
-        cropRadius: props.cropRadius,
+        frequency: props.settings.frequency,
+        isoLevel: props.settings.isoLevel,
+        cropRadius: props.settings.cropRadius,
       }),
     [
-      props.cropRadius,
-      props.frequency,
+      field,
       props.integrationLength,
-      props.isoLevel,
       props.seedPattern,
+      props.settings.cropRadius,
+      props.settings.frequency,
+      props.settings.isoLevel,
       props.strandCount,
       props.strandSpacing,
     ],
-  );
-
-  const settings: SurfaceSettings = useMemo(
-    () => ({
-      preset: 'Gyroid',
-      morphTarget: 'Gyroid',
-      morphAmount: 0,
-      morphPath: 'No morph',
-      isoLevel: props.isoLevel,
-      resolution: 52,
-      scale: props.cropRadius * 1.05,
-      frequency: props.frequency,
-      cropRadius: props.cropRadius,
-      cropSoftness: 0.08,
-      shellThickness: 0.02,
-    }),
-    [props.cropRadius, props.frequency, props.isoLevel],
   );
 
   const ribbonLook = props.weavePreset === 'fiber-bundle rainbow ribbon' ? 1 : props.weavePreset === 'metallic pale ribbon' ? 2 : props.weavePreset === 'luminous braided textile' ? 3 : 0;
@@ -95,7 +80,7 @@ export function SurfaceWeaves(props: SurfaceWeavesProps) {
 
   return (
     <group ref={groupRef}>
-      <TpmsPreviewSurface settings={settings} visible={props.showSurface} opacity={props.surfaceOpacity} color="#7cdcff" />
+      <TpmsPreviewSurface settings={props.settings} visible={props.showSurface} opacity={props.surfaceOpacity} color="#7cdcff" />
       {strands.map((points, index) => (
         <WeaveStrand
           key={index}
@@ -104,7 +89,9 @@ export function SurfaceWeaves(props: SurfaceWeavesProps) {
           tubeRadius={props.strandThickness}
           ribbonWidth={props.ribbonWidth}
           ribbonThickness={props.ribbonThickness}
-          frequency={props.frequency}
+          field={field}
+          frequency={props.settings.frequency}
+          isoLevel={props.settings.isoLevel}
           material={ribbonMaterial}
         />
       ))}
@@ -118,7 +105,9 @@ function WeaveStrand({
   tubeRadius,
   ribbonWidth,
   ribbonThickness,
+  field,
   frequency,
+  isoLevel,
   material,
 }: {
   points: THREE.Vector3[];
@@ -126,7 +115,9 @@ function WeaveStrand({
   tubeRadius: number;
   ribbonWidth: number;
   ribbonThickness: number;
+  field: ScalarField;
   frequency: number;
+  isoLevel: number;
   material: THREE.ShaderMaterial;
 }) {
   const geometry = useMemo(() => {
@@ -134,15 +125,18 @@ function WeaveStrand({
       return buildRibbonGeometry(points, {
         width: ribbonWidth,
         thickness: ribbonThickness,
+        field,
         frequency,
+        isoLevel,
         fiberColumns: renderStyle === 'fiber-bundle ribbon' ? 18 : 2,
+        closed: true,
       });
     }
     if (renderStyle === 'tube') {
-      return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), Math.max(32, points.length * 2), tubeRadius, 10, false);
+      return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points, true), Math.max(32, points.length * 2), tubeRadius, 10, true);
     }
-    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), Math.max(32, points.length * 2), Math.max(0.002, tubeRadius * 0.32), 6, false);
-  }, [frequency, points, renderStyle, ribbonThickness, ribbonWidth, tubeRadius]);
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points, true), Math.max(32, points.length * 2), Math.max(0.002, tubeRadius * 0.32), 6, true);
+  }, [field, frequency, isoLevel, points, renderStyle, ribbonThickness, ribbonWidth, tubeRadius]);
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 

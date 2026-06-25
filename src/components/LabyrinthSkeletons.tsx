@@ -2,16 +2,12 @@ import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { generateLabyrinthSkeletons } from '../math/labyrinthSkeletons';
-import type { SurfacePreset } from '../math/scalarFields';
 import type { SurfaceSettings } from '../rendering/geometryCache';
 import { TpmsPreviewSurface } from './TpmsPreviewSurface';
 
 interface LabyrinthSkeletonsProps {
-  preset: SurfacePreset;
-  isoLevel: number;
-  resolution: number;
+  settings: SurfaceSettings;
   fieldFrequency: number;
-  cropRadius: number;
   surfaceOpacity: number;
   showSurface: boolean;
   showSkeletonA: boolean;
@@ -23,32 +19,15 @@ interface LabyrinthSkeletonsProps {
 
 export function LabyrinthSkeletons(props: LabyrinthSkeletonsProps) {
   const groupRef = useRef<THREE.Group>(null);
-  const settings: SurfaceSettings = useMemo(
-    () => ({
-      preset: props.preset,
-      morphTarget: props.preset,
-      morphAmount: 0,
-      morphPath: 'No morph',
-      isoLevel: props.isoLevel,
-      resolution: props.resolution,
-      scale: props.cropRadius * 1.05,
-      frequency: props.fieldFrequency,
-      cropRadius: props.cropRadius,
-      cropSoftness: 0.08,
-      shellThickness: 0.02,
-    }),
-    [props.cropRadius, props.fieldFrequency, props.isoLevel, props.preset, props.resolution],
-  );
-
   const skeletons = useMemo(
     () =>
       generateLabyrinthSkeletons({
-        cropRadius: props.cropRadius,
+        cropRadius: props.settings.cropRadius,
         scale: props.fieldFrequency * 0.9,
         density: 2.4,
         phase: props.animationSpeed * 0.15,
       }),
-    [props.animationSpeed, props.cropRadius, props.fieldFrequency],
+    [props.animationSpeed, props.fieldFrequency, props.settings.cropRadius],
   );
 
   useFrame((_, delta) => {
@@ -59,7 +38,7 @@ export function LabyrinthSkeletons(props: LabyrinthSkeletonsProps) {
 
   return (
     <group ref={groupRef}>
-      <TpmsPreviewSurface settings={settings} visible={props.showSurface} opacity={props.surfaceOpacity} color="#d8f7ff" />
+      <TpmsPreviewSurface settings={props.settings} visible={props.showSurface} opacity={props.surfaceOpacity} color="#d8f7ff" />
       {props.showSkeletonA && <SkeletonNetwork curves={skeletons.a} color="#14f1ff" radius={props.tubeRadius} />}
       {props.showSkeletonB && <SkeletonNetwork curves={skeletons.b} color="#ff4bd8" radius={props.tubeRadius} />}
     </group>

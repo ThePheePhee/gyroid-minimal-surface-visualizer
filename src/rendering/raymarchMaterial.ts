@@ -8,6 +8,13 @@ const surfaceIndex: Record<SurfacePreset, number> = {
   'Schwarz P': 1,
   Diamond: 2,
   Neovius: 3,
+  Lidinoid: 4,
+  'Schoen I-WP': 5,
+  'Schoen F-RD': 6,
+  'Schwarz CLP': 7,
+  'Fischer-Koch S': 8,
+  'Split P': 9,
+  'Double Gyroid': 10,
 };
 
 const morphPathIndex: Record<MorphPath, number> = {
@@ -50,9 +57,11 @@ const fragmentShader = /* glsl */ `
   uniform float uTwist;
   uniform float uSurfaceThickness;
   uniform float uRimStrength;
+  uniform int uComplementMode;
 
   const int MAX_STEPS = 768;
   const int REFINE_STEPS = 7;
+  const float SURFACE_COUNT = 11.0;
 
   vec3 hsv2rgb(vec3 c) {
     vec3 p = abs(fract(c.xxx + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
@@ -108,6 +117,80 @@ const fragmentShader = /* glsl */ `
     ) / 13.0;
   }
 
+  float lidinoid(vec3 p) {
+    return (
+      0.5 * (
+        sin(2.0 * p.x) * cos(p.y) * sin(p.z) +
+        sin(2.0 * p.y) * cos(p.z) * sin(p.x) +
+        sin(2.0 * p.z) * cos(p.x) * sin(p.y)
+      ) -
+      0.5 * (
+        cos(2.0 * p.x) * cos(2.0 * p.y) +
+        cos(2.0 * p.y) * cos(2.0 * p.z) +
+        cos(2.0 * p.z) * cos(2.0 * p.x)
+      ) +
+      0.15
+    ) / 2.2;
+  }
+
+  float schoenIwp(vec3 p) {
+    return (
+      2.0 * (
+        cos(p.x) * cos(p.y) +
+        cos(p.y) * cos(p.z) +
+        cos(p.z) * cos(p.x)
+      ) -
+      (cos(2.0 * p.x) + cos(2.0 * p.y) + cos(2.0 * p.z))
+    ) / 6.0;
+  }
+
+  float schoenFrd(vec3 p) {
+    return (
+      4.0 * cos(p.x) * cos(p.y) * cos(p.z) -
+      (
+        cos(2.0 * p.x) * cos(2.0 * p.y) +
+        cos(2.0 * p.y) * cos(2.0 * p.z) +
+        cos(2.0 * p.z) * cos(2.0 * p.x)
+      )
+    ) / 7.0;
+  }
+
+  float schwarzClp(vec3 p) {
+    return (
+      cos(p.x) + cos(p.y) + cos(p.z) +
+      cos(p.x) * cos(p.y) * cos(p.z)
+    ) / 4.0;
+  }
+
+  float fischerKochS(vec3 p) {
+    return (
+      cos(2.0 * p.x) * sin(p.y) * cos(p.z) +
+      cos(p.x) * cos(2.0 * p.y) * sin(p.z) +
+      sin(p.x) * cos(p.y) * cos(2.0 * p.z)
+    ) / 3.0;
+  }
+
+  float splitP(vec3 p) {
+    return (
+      1.1 * (
+        sin(2.0 * p.x) * sin(p.z) * cos(p.y) +
+        sin(2.0 * p.y) * sin(p.x) * cos(p.z) +
+        sin(2.0 * p.z) * sin(p.y) * cos(p.x)
+      ) -
+      0.2 * (
+        cos(2.0 * p.x) * cos(2.0 * p.y) +
+        cos(2.0 * p.y) * cos(2.0 * p.z) +
+        cos(2.0 * p.z) * cos(2.0 * p.x)
+      ) -
+      0.4 * (cos(2.0 * p.x) + cos(2.0 * p.y) + cos(2.0 * p.z))
+    ) / 2.7;
+  }
+
+  float doubleGyroid(vec3 p) {
+    float g = gyroid(p);
+    return g * g - 0.18;
+  }
+
   float fieldByIndex(int index, vec3 p) {
     float value = gyroid(p);
     if (index == 1) {
@@ -116,6 +199,20 @@ const fragmentShader = /* glsl */ `
       value = diamond(p);
     } else if (index == 3) {
       value = neovius(p);
+    } else if (index == 4) {
+      value = lidinoid(p);
+    } else if (index == 5) {
+      value = schoenIwp(p);
+    } else if (index == 6) {
+      value = schoenFrd(p);
+    } else if (index == 7) {
+      value = schwarzClp(p);
+    } else if (index == 8) {
+      value = fischerKochS(p);
+    } else if (index == 9) {
+      value = splitP(p);
+    } else if (index == 10) {
+      value = doubleGyroid(p);
     }
     return value;
   }
@@ -140,9 +237,9 @@ const fragmentShader = /* glsl */ `
     vec3 q = animatedDomain(p) * uFrequency;
     float value = 0.0;
     if (uMorphPath == 2) {
-      float scaled = fract(uMorphAmount) * 4.0;
+      float scaled = fract(uMorphAmount) * SURFACE_COUNT;
       int fromIndex = int(floor(scaled));
-      int toIndex = int(mod(float(fromIndex + 1), 4.0));
+      int toIndex = int(mod(float(fromIndex + 1), SURFACE_COUNT));
       float t = smootherstep(fract(scaled));
       value = mix(fieldByIndex(fromIndex, q), fieldByIndex(toIndex, q), t);
     } else if (uMorphPath == 1) {
@@ -236,6 +333,52 @@ const fragmentShader = /* glsl */ `
     return false;
   }
 
+  bool findComplementSolid(vec3 origin, vec3 direction, float nearT, float farT, out vec3 hitPosition, out float hitGradient, out float hitKind) {
+    float startT = max(nearT, 0.0);
+    float travel = farT - startT;
+    float stepSize = travel / float(max(uRaySteps, 1));
+    float epsilonT = min(stepSize * 0.25, 0.012);
+    float previousT = startT + epsilonT;
+    float previousValue = morphedField(origin + direction * previousT);
+
+    if (previousValue >= 0.0) {
+      hitPosition = origin + direction * startT;
+      hitGradient = 0.35;
+      hitKind = 1.0;
+      return true;
+    }
+
+    for (int i = 1; i <= MAX_STEPS; i++) {
+      if (i > uRaySteps) break;
+      float currentT = startT + stepSize * float(i);
+      vec3 p = origin + direction * currentT;
+      float currentValue = morphedField(p);
+
+      if (previousValue < 0.0 && currentValue >= 0.0) {
+        float lo = previousT;
+        float hi = currentT;
+        for (int j = 0; j < REFINE_STEPS; j++) {
+          float mid = 0.5 * (lo + hi);
+          float midValue = morphedField(origin + direction * mid);
+          if (midValue < 0.0) {
+            lo = mid;
+          } else {
+            hi = mid;
+          }
+        }
+        hitPosition = origin + direction * (0.5 * (lo + hi));
+        hitGradient = clamp(length(estimateGradient(hitPosition)) * 0.22, 0.0, 1.0);
+        hitKind = 0.0;
+        return true;
+      }
+
+      previousT = currentT;
+      previousValue = currentValue;
+    }
+
+    return false;
+  }
+
   vec3 shadeSurface(vec3 position, vec3 normal, vec3 viewDir, float gradient) {
     vec3 n = normalize(normal);
     vec3 lightDir = normalize(vec3(-0.35, 0.75, 0.55));
@@ -288,11 +431,18 @@ const fragmentShader = /* glsl */ `
 
     vec3 hitPosition;
     float hitGradient;
-    if (!findSurface(rayOrigin, rayDirection, nearT, farT, hitPosition, hitGradient)) {
-      discard;
+    float hitKind = 0.0;
+    if (uComplementMode == 1) {
+      if (!findComplementSolid(rayOrigin, rayDirection, nearT, farT, hitPosition, hitGradient, hitKind)) {
+        discard;
+      }
+    } else {
+      if (!findSurface(rayOrigin, rayDirection, nearT, farT, hitPosition, hitGradient)) {
+        discard;
+      }
     }
 
-    vec3 normal = estimateNormal(hitPosition);
+    vec3 normal = hitKind > 0.5 ? normalize(hitPosition) : estimateNormal(hitPosition);
     vec3 viewDir = normalize(rayOrigin - hitPosition);
     if (dot(normal, viewDir) < 0.0) {
       normal = -normal;
@@ -330,6 +480,7 @@ export function createRaymarchMaterial() {
       uTwist: { value: 0.035 },
       uSurfaceThickness: { value: 0.04 },
       uRimStrength: { value: 1.2 },
+      uComplementMode: { value: 0 },
     },
   });
 }
@@ -355,6 +506,7 @@ export function updateRaymarchMaterial(
     wobbleScale: number;
     breathing: number;
     twist: number;
+    complementSolid: boolean;
   },
 ) {
   const { uniforms } = material;
@@ -375,6 +527,7 @@ export function updateRaymarchMaterial(
   uniforms.uBreathing.value = options.breathing;
   uniforms.uTwist.value = options.twist;
   uniforms.uSurfaceThickness.value = settings.shellThickness;
+  uniforms.uComplementMode.value = options.complementSolid ? 1 : 0;
   uniforms.uRimStrength.value =
     options.colorMode === 'metallic white/gold rim emphasis'
       ? 2.2

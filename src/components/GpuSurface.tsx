@@ -14,6 +14,7 @@ interface GpuSurfaceProps {
   wobbleScale: number;
   breathing: number;
   twist: number;
+  complementSolid: boolean;
 }
 
 export function GpuSurface({
@@ -26,6 +27,7 @@ export function GpuSurface({
   wobbleScale,
   breathing,
   twist,
+  complementSolid,
 }: GpuSurfaceProps) {
   const material = useMemo(() => createRaymarchMaterial(), []);
   const { camera } = useThree();
@@ -41,11 +43,13 @@ export function GpuSurface({
       wobbleScale,
       breathing,
       twist,
+      complementSolid,
     });
   }, [
     autoRotationSpeed,
     breathing,
     colorMode,
+    complementSolid,
     material,
     raySteps,
     settings,

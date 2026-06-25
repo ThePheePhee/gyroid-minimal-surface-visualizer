@@ -32,7 +32,7 @@ export function buildSurfaceGeometry(settings: SurfaceSettings) {
   });
 }
 
-function buildMorphedField(settings: SurfaceSettings): ScalarField {
+export function buildMorphedField(settings: SurfaceSettings): ScalarField {
   if (settings.morphPath === 'No morph') {
     return getNormalizedScalarField(settings.preset);
   }

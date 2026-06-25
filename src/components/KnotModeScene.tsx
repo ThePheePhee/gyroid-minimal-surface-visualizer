@@ -1,6 +1,7 @@
 import type { SurfacePreset } from '../math/scalarFields';
 import type { FilmMaterial, KnotPreset } from '../math/knotGeometry';
 import type { WeavePreset, WeaveRenderStyle } from '../math/weaveCurves';
+import type { MorphPath, SurfaceSettings } from '../rendering/geometryCache';
 import { KnotFilm } from './KnotFilm';
 import { LabyrinthSkeletons } from './LabyrinthSkeletons';
 import { SurfaceWeaves } from './SurfaceWeaves';
@@ -10,6 +11,9 @@ export type KnotRelationshipType = 'Labyrinth Skeletons' | 'Surface Curves / Wea
 interface KnotModeSceneProps {
   relationshipType: KnotRelationshipType;
   surfacePreset: SurfacePreset;
+  morphTarget: SurfacePreset;
+  morphPath: MorphPath;
+  morphAmount: number;
   isoLevel: number;
   resolution: number;
   fieldFrequency: number;
@@ -48,14 +52,25 @@ interface KnotModeSceneProps {
 }
 
 export function KnotModeScene(props: KnotModeSceneProps) {
+  const surfaceSettings: SurfaceSettings = {
+    preset: props.surfacePreset,
+    morphTarget: props.morphTarget,
+    morphPath: props.morphPath,
+    morphAmount: props.morphAmount,
+    isoLevel: props.isoLevel,
+    resolution: props.resolution,
+    scale: props.cropRadius * 1.05,
+    frequency: props.fieldFrequency,
+    cropRadius: props.cropRadius,
+    cropSoftness: 0.08,
+    shellThickness: 0.02,
+  };
+
   if (props.relationshipType === 'Labyrinth Skeletons') {
     return (
       <LabyrinthSkeletons
-        preset={props.surfacePreset}
-        isoLevel={props.isoLevel}
-        resolution={props.resolution}
+        settings={surfaceSettings}
         fieldFrequency={props.fieldFrequency}
-        cropRadius={props.cropRadius}
         surfaceOpacity={props.surfaceOpacity}
         showSurface={props.showSurface}
         showSkeletonA={props.showSkeletonA}
@@ -104,9 +119,7 @@ export function KnotModeScene(props: KnotModeSceneProps) {
       fiberDensity={props.fiberDensity}
       autoRotationSpeed={props.autoRotationSpeed}
       breathing={props.weaveBreathing}
-      cropRadius={props.cropRadius}
-      frequency={props.fieldFrequency}
-      isoLevel={props.isoLevel}
+      settings={surfaceSettings}
     />
   );
 }

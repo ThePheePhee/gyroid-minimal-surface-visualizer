@@ -56,7 +56,11 @@ const filmMaterialOptions: Record<FilmMaterial, FilmMaterial> = {
 };
 type LevaGet = (path: string) => unknown;
 const whenSurface = (get: LevaGet) => get('Visualization Mode') === 'Surface Mode';
+const whenSurfaceGpu = (get: LevaGet) =>
+  get('Visualization Mode') === 'Surface Mode' && get('Render mode') === 'GPU continuous raymarch';
 const whenKnot = (get: LevaGet) => get('Visualization Mode') === 'Knot Mode';
+const whenKnotSurfaceRelation = (get: LevaGet) =>
+  get('Visualization Mode') === 'Knot Mode' && get('Knot Relationship Type') !== 'Knot-Bounded Minimal Film';
 const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
   get('Visualization Mode') === 'Knot Mode' && get('Knot Relationship Type') === type;
 
@@ -79,6 +83,7 @@ export function Scene() {
     'Spherical crop radius': { value: 2.08, min: 0.6, max: 3.8, step: 0.03, render: whenSurface },
     'Crop softness': { value: 0.09, min: 0.01, max: 0.5, step: 0.01, render: whenSurface },
     'Visual shell thickness': { value: 0.04, min: 0, max: 0.16, step: 0.005, render: whenSurface },
+    'Complement solid': { value: false, render: whenSurfaceGpu },
     Wireframe: { value: false, render: whenSurface },
     'Smooth shading': { value: true, render: whenSurface },
     'Color mode': { value: 'rainbow curvature-like bands' as ColorMode, options: colorOptions, render: whenSurface },
@@ -95,6 +100,12 @@ export function Scene() {
       render: whenKnot,
     },
     'Knot surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions, render: whenKnot },
+    'Knot morph target': { value: 'Lidinoid' as SurfacePreset, options: presetOptions, render: whenKnotSurfaceRelation },
+    'Knot morph path': { value: 'No morph' as MorphPath, options: morphPathOptions, render: whenKnotSurfaceRelation },
+    'Knot morph amount': { value: 0, min: 0, max: 1, step: 0.01, render: whenKnotSurfaceRelation },
+    'Animate knot morph': { value: false, render: whenKnotSurfaceRelation },
+    'Knot morph speed': { value: 0.06, min: 0.01, max: 0.5, step: 0.01, render: whenKnotSurfaceRelation },
+    'Knot morph remesh rate': { value: 8, min: 2, max: 20, step: 1, render: whenKnotSurfaceRelation },
     'Knot iso-level': { value: 0, min: -0.5, max: 0.5, step: 0.01, render: whenKnot },
     'Knot resolution': { value: 46, min: 20, max: 72, step: 2, render: whenKnot },
     'Knot field frequency': { value: 3.1, min: 1.2, max: 5, step: 0.05, render: whenKnot },
@@ -140,6 +151,7 @@ export function Scene() {
   });
 
   const [autoMorph, setAutoMorph] = useState(0);
+  const [autoKnotMorph, setAutoKnotMorph] = useState(0);
 
   useEffect(() => {
     if (!controls['Animate morph'] || controls['Morph path'] === 'No morph') {
@@ -169,6 +181,34 @@ export function Scene() {
     return () => window.cancelAnimationFrame(frameId);
   }, [autoMorph, controls]);
 
+  useEffect(() => {
+    if (!controls['Animate knot morph'] || controls['Knot morph path'] === 'No morph') {
+      return undefined;
+    }
+
+    let frameId = 0;
+    let phase = autoKnotMorph;
+    let lastTime = performance.now();
+    let lastRemesh = lastTime;
+    const remeshInterval = 1000 / controls['Knot morph remesh rate'];
+
+    const tick = (time: number) => {
+      const delta = Math.min(0.1, (time - lastTime) / 1000);
+      lastTime = time;
+      phase = (phase + delta * controls['Knot morph speed']) % 1;
+
+      if (time - lastRemesh >= remeshInterval) {
+        setAutoKnotMorph(phase);
+        lastRemesh = time;
+      }
+
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [autoKnotMorph, controls]);
+
   const effectiveMorphAmount =
     controls['Morph path'] === 'No morph'
       ? 0
@@ -177,6 +217,15 @@ export function Scene() {
           ? autoMorph
           : 0.5 + 0.5 * Math.sin(autoMorph * Math.PI * 2)
         : controls['Morph amount'];
+
+  const effectiveKnotMorphAmount =
+    controls['Knot morph path'] === 'No morph'
+      ? 0
+      : controls['Animate knot morph']
+        ? controls['Knot morph path'] === 'Cycle all families'
+          ? autoKnotMorph
+          : 0.5 + 0.5 * Math.sin(autoKnotMorph * Math.PI * 2)
+        : controls['Knot morph amount'];
 
   const settings = useMemo(
     () => ({
@@ -219,6 +268,9 @@ export function Scene() {
             <KnotModeScene
               relationshipType={controls['Knot Relationship Type']}
               surfacePreset={controls['Knot surface preset']}
+              morphTarget={controls['Knot morph target']}
+              morphPath={controls['Knot morph path']}
+              morphAmount={effectiveKnotMorphAmount}
               isoLevel={controls['Knot iso-level']}
               resolution={controls['Knot resolution']}
               fieldFrequency={controls['Knot field frequency']}
@@ -266,6 +318,7 @@ export function Scene() {
               wobbleScale={controls['Wobble spatial scale']}
               breathing={controls['Whole-object breathing']}
               twist={controls['Psychedelic twist']}
+              complementSolid={controls['Complement solid']}
             />
           ) : (
             <SurfaceMesh

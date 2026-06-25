@@ -19,7 +19,7 @@ Surface Mode is the original TPMS visualizer and remains the default on launch. 
 Knot Mode is a second top-level instrument for exploring relationships between knots, weave curves, and TPMS-like surfaces. It has three relationship types:
 
 - Labyrinth Skeletons: shows the TPMS membrane between two contrasting skeletal tube networks. The first version uses a procedural gyroid-inspired approximation, not an exact medial-axis extraction.
-- Surface Curves / Weaves: traces repeatable curve families that are projected onto the gyroid level set and renders them as lines, tubes, ribbons, or fiber-bundle ribbons. This is the main textile-like mode.
+- Surface Curves / Weaves: traces repeatable closed loop families that are projected onto the active TPMS level set and renders them as lines, tubes, ribbons, or fiber-bundle ribbons. This is the main textile-like mode.
 - Knot-Bounded Minimal Film: renders knot boundaries such as a trefoil and spans them with a relaxed soap-film-like mesh. This is a stable visual approximation, not a full Plateau-problem solver.
 
 ## Run Locally
@@ -51,7 +51,7 @@ The Leva panel starts with a top-level `Visualization Mode` selector:
 
 Surface Mode exposes:
 
-- Surface preset selection: Gyroid, Schwarz P, Diamond, Neovius
+- Surface preset selection: Gyroid, Schwarz P, Diamond, Neovius, Lidinoid, Schoen I-WP, Schoen F-RD, Schwarz CLP, Fischer-Koch S, Split P, Double Gyroid
 - Render mode:
   - GPU continuous raymarch
   - CPU mesh debug
@@ -68,6 +68,7 @@ Surface Mode exposes:
 - Spherical crop radius
 - Crop softness
 - Visual shell thickness
+- Complement solid toggle for the GPU renderer, showing one clipped labyrinth volume inside the spherical crop
 - Wireframe toggle
 - Smooth shading toggle
 - Color mode:
@@ -89,6 +90,7 @@ Knot Mode exposes `Knot Relationship Type`:
 Shared Knot Mode controls include:
 
 - Surface preset for the translucent TPMS reference surface
+- Knot morph target, morph path, morph amount, morph speed, and remesh rate for surface-based Knot Mode views
 - Iso-level
 - Resolution
 - Field frequency
@@ -119,6 +121,8 @@ Surface Curves / Weaves controls include:
 - Oil-slick intensity
 - Fiber texture density
 - Weave breathing
+
+The weave curves are closed by construction. The generator starts from smooth closed seed loops in several orientations, projects them onto the current implicit level set, then alternates smoothing and projection. This keeps the ribbon continuous and much closer to differentiable than the earlier open trace method, while remaining an exploratory approximation rather than an exact geodesic solver.
 
 Knot-Bounded Minimal Film controls include:
 
@@ -169,27 +173,101 @@ f(x,y,z) =
 f(x,y,z) = 3(cos(x) + cos(y) + cos(z)) + 4 cos(x) cos(y) cos(z)
 ```
 
+### Lidinoid
+
+```txt
+f(x,y,z) =
+  0.5(sin(2x) cos(y) sin(z)
+    + sin(2y) cos(z) sin(x)
+    + sin(2z) cos(x) sin(y))
+  - 0.5(cos(2x) cos(2y)
+    + cos(2y) cos(2z)
+    + cos(2z) cos(2x))
+  + 0.15
+```
+
+### Schoen I-WP
+
+```txt
+f(x,y,z) =
+  2(cos(x) cos(y) + cos(y) cos(z) + cos(z) cos(x))
+  - (cos(2x) + cos(2y) + cos(2z))
+```
+
+### Schoen F-RD
+
+```txt
+f(x,y,z) =
+  4 cos(x) cos(y) cos(z)
+  - (cos(2x) cos(2y)
+    + cos(2y) cos(2z)
+    + cos(2z) cos(2x))
+```
+
+### Schwarz CLP
+
+```txt
+f(x,y,z) = cos(x) + cos(y) + cos(z) + cos(x) cos(y) cos(z)
+```
+
+### Fischer-Koch S
+
+```txt
+f(x,y,z) =
+  cos(2x) sin(y) cos(z)
+  + cos(x) cos(2y) sin(z)
+  + sin(x) cos(y) cos(2z)
+```
+
+### Split P
+
+```txt
+f(x,y,z) =
+  1.1(sin(2x) sin(z) cos(y)
+    + sin(2y) sin(x) cos(z)
+    + sin(2z) sin(y) cos(x))
+  - 0.2(cos(2x) cos(2y)
+    + cos(2y) cos(2z)
+    + cos(2z) cos(2x))
+  - 0.4(cos(2x) + cos(2y) + cos(2z))
+```
+
+### Double Gyroid
+
+```txt
+g(x,y,z) = (sin(x) cos(y) + sin(y) cos(z) + sin(z) cos(x)) / 1.5
+f(x,y,z) = g(x,y,z)^2 - 0.18
+```
+
 ## Implementation Notes
 
 - `src/math/scalarFields.ts` defines reusable implicit scalar fields.
 - `src/math/implicitSurface.ts` samples the field, extracts shared-vertex triangle geometry with a face-consistent tetrahedral decomposition, and clips triangles to the spherical crop.
-- `src/math/gyroidAnalysis.ts` provides gyroid value, gradient, and Newton projection helpers for surface-constrained weave curves.
-- `src/math/weaveCurves.ts` generates the first curve families for Surface Curves / Weaves. The current method traces x-directed seeded paths and solves for `z` on the gyroid level set, so the curves ride on the surface without pretending to be exact geodesics.
+- `src/math/weaveCurves.ts` generates closed loop families for Surface Curves / Weaves. The current method projects closed seed curves onto the active implicit level set, smooths them, and projects again so the loops stay continuous while riding on morphed surfaces.
 - `src/math/labyrinthSkeletons.ts` creates procedural gyroid-labyrinth skeleton approximations. These are phase-shifted periodic tube networks tuned for legibility rather than exact medial-axis skeletons.
 - `src/math/knotGeometry.ts` samples knot boundaries and builds a relaxed radial film mesh with fixed boundary vertices and Laplacian-smoothed interiors.
 - `src/rendering/surfaceMaterial.ts` contains the custom GLSL shader for rainbow bands, normal/radial coloring, fake glossy lighting, Fresnel glow, and crop-rim emphasis.
-- `src/rendering/raymarchMaterial.ts` contains the continuous GPU implicit renderer.
+- `src/rendering/raymarchMaterial.ts` contains the continuous GPU implicit renderer and the complement-solid raymarch mode for one clipped labyrinth domain.
 - `src/rendering/ribbonMaterial.ts` contains the fiber-bundle ribbon shader. Ribbon geometry stores local `ribbonAcross` and `ribbonAlong` attributes; the shader maps rainbow hue and fine fiber striping primarily through `ribbonAcross`, so the color bands run across the ribbon width instead of scrolling along the curve.
 - `src/components/Scene.tsx` wires the React Three Fiber scene, Leva controls, lighting, orbit controls, and animation.
 
 ## Mathematical Status
 
-- Exact implicit fields: gyroid, Schwarz P, diamond, and Neovius equations are implemented directly as scalar fields.
+- Exact or standard implicit approximants: gyroid, Schwarz P, diamond, and Neovius are implemented directly as the classic trigonometric approximants.
+- Additional nodal/Fourier approximants: Lidinoid, Schoen I-WP, Schoen F-RD, Schwarz CLP, Fischer-Koch S, Split P, and Double Gyroid are included as visually useful TPMS-style level-set fields. They are exploratory scalar-field approximations, not exact Weierstrass parameterizations.
 - Continuous TPMS rendering: the default Surface Mode renderer is GPU raymarching of the implicit field inside the crop sphere.
 - Surface morphing: morphs blend normalized scalar fields. They are useful exploratory transitions, not canonical mathematical deformations.
-- Surface curves / weaves: first-pass gyroid-constrained curves are generated by projection onto the gyroid level set and are intentionally documented as heuristic.
+- Surface curves / weaves: first-pass closed loops are generated by projection onto the active morphed level set and are intentionally documented as heuristic, not exact geodesics.
+- Complement solid: the GPU renderer can show one of the two clipped labyrinth volumes inside the spherical crop by raymarching the first boundary of the positive field domain.
 - Labyrinth skeletons: first-pass networks are procedural gyroid-inspired skeletons, not computed medial axes.
 - Knot films: first-pass films are relaxed spanning meshes, not guaranteed minimal surfaces.
+
+## References
+
+- Triply periodic minimal surface overview: <https://en.wikipedia.org/wiki/Triply_periodic_minimal_surface>
+- Schwarz P and Schwarz D implicit approximants: <https://en.wikipedia.org/wiki/Schwarz_minimal_surface>
+- Gyroid background and trigonometric approximant: <https://en.wikipedia.org/wiki/Gyroid>
+- Lidinoid background and level-set approximant: <https://en.wikipedia.org/wiki/Lidinoid>
 
 ## Screenshots
 
@@ -201,6 +279,7 @@ The `screenshots/` folder is included as a placeholder. The browser verification
 - Move more curve, skeleton, and mesh generation into GPU or worker pipelines for very high resolutions.
 - Add exact or sampled medial-axis extraction for labyrinth skeletons.
 - Add geodesic or principal-direction tracing for stronger surface-curve families.
+- Add a side selector and translucency controls for complement-solid rendering.
 - Branch out the deferred precalculated morph-path editor as a separate feature.
 - Add export to `.glb` / `.obj`.
 - Add saved presets for specific gyroid, Schwarz P, diamond, and Neovius looks.
