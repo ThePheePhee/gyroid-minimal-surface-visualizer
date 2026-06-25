@@ -4,9 +4,12 @@ import { Leva, useControls } from 'leva';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { surfacePresets, type SurfacePreset } from '../math/scalarFields';
+import type { FilmMaterial, KnotPreset } from '../math/knotGeometry';
+import type { WeavePreset, WeaveRenderStyle } from '../math/weaveCurves';
 import type { MorphPath } from '../rendering/geometryCache';
 import { colorModes, type ColorMode } from '../rendering/surfaceMaterial';
 import { GpuSurface } from './GpuSurface';
+import { KnotModeScene, type KnotRelationshipType } from './KnotModeScene';
 import { SurfaceMesh } from './SurfaceMesh';
 
 const presetOptions = Object.fromEntries(surfacePresets.map((preset) => [preset, preset]));
@@ -20,35 +23,120 @@ const morphPathOptions: Record<MorphPath, MorphPath> = {
   'A to B pulse': 'A to B pulse',
   'Cycle all families': 'Cycle all families',
 };
+const visualizationModeOptions = {
+  'Surface Mode': 'Surface Mode',
+  'Knot Mode': 'Knot Mode',
+} as const;
+const knotRelationshipOptions: Record<KnotRelationshipType, KnotRelationshipType> = {
+  'Surface Curves / Weaves': 'Surface Curves / Weaves',
+  'Labyrinth Skeletons': 'Labyrinth Skeletons',
+  'Knot-Bounded Minimal Film': 'Knot-Bounded Minimal Film',
+};
+const weavePresetOptions: Record<WeavePreset, WeavePreset> = {
+  'clean mathematical ribbon': 'clean mathematical ribbon',
+  'fiber-bundle rainbow ribbon': 'fiber-bundle rainbow ribbon',
+  'metallic pale ribbon': 'metallic pale ribbon',
+  'luminous braided textile': 'luminous braided textile',
+};
+const weaveStyleOptions: Record<WeaveRenderStyle, WeaveRenderStyle> = {
+  line: 'line',
+  tube: 'tube',
+  ribbon: 'ribbon',
+  'fiber-bundle ribbon': 'fiber-bundle ribbon',
+};
+const knotPresetOptions: Record<KnotPreset, KnotPreset> = {
+  Trefoil: 'Trefoil',
+  'Figure-eight': 'Figure-eight',
+  'Torus knot': 'Torus knot',
+};
+const filmMaterialOptions: Record<FilmMaterial, FilmMaterial> = {
+  'translucent soap film': 'translucent soap film',
+  'pearl/porcelain': 'pearl/porcelain',
+  'subtle rainbow interference': 'subtle rainbow interference',
+};
+type LevaGet = (path: string) => unknown;
+const whenSurface = (get: LevaGet) => get('Visualization Mode') === 'Surface Mode';
+const whenKnot = (get: LevaGet) => get('Visualization Mode') === 'Knot Mode';
+const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
+  get('Visualization Mode') === 'Knot Mode' && get('Knot Relationship Type') === type;
 
 export function Scene() {
   const controls = useControls({
-    'Render mode': { value: 'GPU continuous raymarch', options: renderModeOptions },
-    'GPU ray steps': { value: 288, min: 128, max: 640, step: 16 },
-    'Surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions },
-    'Morph target': { value: 'Diamond' as SurfacePreset, options: presetOptions },
-    'Morph path': { value: 'No morph' as MorphPath, options: morphPathOptions },
-    'Morph amount': { value: 0, min: 0, max: 1, step: 0.01 },
-    'Animate morph': false,
-    'Morph speed': { value: 0.08, min: 0.01, max: 0.5, step: 0.01 },
-    'Morph remesh rate': { value: 10, min: 2, max: 20, step: 1 },
-    'Iso-level / threshold': { value: 0, min: -0.7, max: 0.7, step: 0.01 },
-    Resolution: { value: 64, min: 24, max: 96, step: 2 },
-    Scale: { value: 2.25, min: 1.2, max: 4, step: 0.05 },
-    'Number of periods / spatial frequency': { value: 3.1, min: 0.8, max: 6, step: 0.05 },
-    'Spherical crop radius': { value: 2.08, min: 0.6, max: 3.8, step: 0.03 },
-    'Crop softness': { value: 0.09, min: 0.01, max: 0.5, step: 0.01 },
-    'Visual shell thickness': { value: 0.04, min: 0, max: 0.16, step: 0.005 },
-    Wireframe: false,
-    'Smooth shading': true,
-    'Color mode': { value: 'rainbow curvature-like bands' as ColorMode, options: colorOptions },
+    'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions },
+    'Render mode': { value: 'GPU continuous raymarch', options: renderModeOptions, render: whenSurface },
+    'GPU ray steps': { value: 288, min: 128, max: 640, step: 16, render: whenSurface },
+    'Surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions, render: whenSurface },
+    'Morph target': { value: 'Diamond' as SurfacePreset, options: presetOptions, render: whenSurface },
+    'Morph path': { value: 'No morph' as MorphPath, options: morphPathOptions, render: whenSurface },
+    'Morph amount': { value: 0, min: 0, max: 1, step: 0.01, render: whenSurface },
+    'Animate morph': { value: false, render: whenSurface },
+    'Morph speed': { value: 0.08, min: 0.01, max: 0.5, step: 0.01, render: whenSurface },
+    'Morph remesh rate': { value: 10, min: 2, max: 20, step: 1, render: whenSurface },
+    'Iso-level / threshold': { value: 0, min: -0.7, max: 0.7, step: 0.01, render: whenSurface },
+    Resolution: { value: 64, min: 24, max: 96, step: 2, render: whenSurface },
+    Scale: { value: 2.25, min: 1.2, max: 4, step: 0.05, render: whenSurface },
+    'Number of periods / spatial frequency': { value: 3.1, min: 0.8, max: 6, step: 0.05, render: whenSurface },
+    'Spherical crop radius': { value: 2.08, min: 0.6, max: 3.8, step: 0.03, render: whenSurface },
+    'Crop softness': { value: 0.09, min: 0.01, max: 0.5, step: 0.01, render: whenSurface },
+    'Visual shell thickness': { value: 0.04, min: 0, max: 0.16, step: 0.005, render: whenSurface },
+    Wireframe: { value: false, render: whenSurface },
+    'Smooth shading': { value: true, render: whenSurface },
+    'Color mode': { value: 'rainbow curvature-like bands' as ColorMode, options: colorOptions, render: whenSurface },
     'Black background': true,
     'Auto-rotation speed': { value: 0.22, min: 0, max: 1.5, step: 0.01 },
-    'Wobble amplitude': { value: 0.018, min: 0, max: 0.12, step: 0.002 },
-    'Wobble speed': { value: 1.15, min: 0.05, max: 4, step: 0.05 },
-    'Wobble spatial scale': { value: 4.2, min: 0.5, max: 12, step: 0.1 },
-    'Whole-object breathing': { value: 0.018, min: 0, max: 0.12, step: 0.002 },
-    'Psychedelic twist': { value: 0.035, min: 0, max: 0.5, step: 0.005 },
+    'Wobble amplitude': { value: 0.018, min: 0, max: 0.12, step: 0.002, render: whenSurface },
+    'Wobble speed': { value: 1.15, min: 0.05, max: 4, step: 0.05, render: whenSurface },
+    'Wobble spatial scale': { value: 4.2, min: 0.5, max: 12, step: 0.1, render: whenSurface },
+    'Whole-object breathing': { value: 0.018, min: 0, max: 0.12, step: 0.002, render: whenSurface },
+    'Psychedelic twist': { value: 0.035, min: 0, max: 0.5, step: 0.005, render: whenSurface },
+    'Knot Relationship Type': {
+      value: 'Surface Curves / Weaves' as KnotRelationshipType,
+      options: knotRelationshipOptions,
+      render: whenKnot,
+    },
+    'Knot surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions, render: whenKnot },
+    'Knot iso-level': { value: 0, min: -0.5, max: 0.5, step: 0.01, render: whenKnot },
+    'Knot resolution': { value: 46, min: 20, max: 72, step: 2, render: whenKnot },
+    'Knot field frequency': { value: 3.1, min: 1.2, max: 5, step: 0.05, render: whenKnot },
+    'Knot crop radius': { value: 2.1, min: 1, max: 3.6, step: 0.05, render: whenKnot },
+    'Show knot surface': { value: true, render: whenKnot },
+    'Knot surface opacity': { value: 0.22, min: 0, max: 0.75, step: 0.01, render: whenKnot },
+    'Show skeleton A': { value: true, render: whenKnotType('Labyrinth Skeletons') },
+    'Show skeleton B': { value: true, render: whenKnotType('Labyrinth Skeletons') },
+    'Skeleton tube radius': { value: 0.026, min: 0.006, max: 0.09, step: 0.002, render: whenKnotType('Labyrinth Skeletons') },
+    'Skeleton animation speed': { value: 0, min: 0, max: 8, step: 0.1, render: whenKnotType('Labyrinth Skeletons') },
+    'Weave preset': {
+      value: 'fiber-bundle rainbow ribbon' as WeavePreset,
+      options: weavePresetOptions,
+      render: whenKnotType('Surface Curves / Weaves'),
+    },
+    'Weave render style': {
+      value: 'fiber-bundle ribbon' as WeaveRenderStyle,
+      options: weaveStyleOptions,
+      render: whenKnotType('Surface Curves / Weaves'),
+    },
+    'Strand count': { value: 9, min: 2, max: 24, step: 1, render: whenKnotType('Surface Curves / Weaves') },
+    'Strand spacing': { value: 0.62, min: 0.18, max: 1.4, step: 0.02, render: whenKnotType('Surface Curves / Weaves') },
+    'Strand thickness': { value: 0.018, min: 0.004, max: 0.08, step: 0.002, render: whenKnotType('Surface Curves / Weaves') },
+    'Ribbon width': { value: 0.15, min: 0.025, max: 0.42, step: 0.005, render: whenKnotType('Surface Curves / Weaves') },
+    'Ribbon thickness': { value: 0.012, min: 0, max: 0.06, step: 0.002, render: whenKnotType('Surface Curves / Weaves') },
+    'Curve integration length': { value: 2.1, min: 0.8, max: 4.2, step: 0.05, render: whenKnotType('Surface Curves / Weaves') },
+    'Seed pattern': { value: 1, min: 0, max: 12, step: 1, render: whenKnotType('Surface Curves / Weaves') },
+    'Rainbow intensity': { value: 0.92, min: 0, max: 1, step: 0.01, render: whenKnotType('Surface Curves / Weaves') },
+    'Oil slick intensity': { value: 0.55, min: 0, max: 1, step: 0.01, render: whenKnotType('Surface Curves / Weaves') },
+    'Fiber texture density': { value: 34, min: 4, max: 96, step: 1, render: whenKnotType('Surface Curves / Weaves') },
+    'Weave breathing': { value: 0.012, min: 0, max: 0.08, step: 0.002, render: whenKnotType('Surface Curves / Weaves') },
+    'Knot preset': { value: 'Trefoil' as KnotPreset, options: knotPresetOptions, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Knot scale': { value: 1.2, min: 0.4, max: 2.3, step: 0.04, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Boundary tube radius': { value: 0.035, min: 0.006, max: 0.12, step: 0.002, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Show boundary knot': { value: true, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Show film': { value: true, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Film opacity': { value: 0.48, min: 0, max: 0.9, step: 0.01, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Film smoothing iterations': { value: 28, min: 0, max: 90, step: 1, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Film thickness': { value: 0.01, min: 0, max: 0.08, step: 0.002, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Film material': { value: 'subtle rainbow interference' as FilmMaterial, options: filmMaterialOptions, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Torus p': { value: 2, min: 1, max: 8, step: 1, render: whenKnotType('Knot-Bounded Minimal Film') },
+    'Torus q': { value: 3, min: 1, max: 9, step: 1, render: whenKnotType('Knot-Bounded Minimal Film') },
   });
 
   const [autoMorph, setAutoMorph] = useState(0);
@@ -127,7 +215,47 @@ export function Scene() {
         <directionalLight position={[-5, -2, -3]} intensity={1.1} color="#36ddff" />
         <pointLight position={[0, 0, 5]} intensity={2.2} color="#ffffff" />
         <Suspense fallback={null}>
-          {controls['Render mode'] === 'GPU continuous raymarch' ? (
+          {controls['Visualization Mode'] === 'Knot Mode' ? (
+            <KnotModeScene
+              relationshipType={controls['Knot Relationship Type']}
+              surfacePreset={controls['Knot surface preset']}
+              isoLevel={controls['Knot iso-level']}
+              resolution={controls['Knot resolution']}
+              fieldFrequency={controls['Knot field frequency']}
+              cropRadius={controls['Knot crop radius']}
+              surfaceOpacity={controls['Knot surface opacity']}
+              showSurface={controls['Show knot surface']}
+              showSkeletonA={controls['Show skeleton A']}
+              showSkeletonB={controls['Show skeleton B']}
+              skeletonTubeRadius={controls['Skeleton tube radius']}
+              skeletonAnimationSpeed={controls['Skeleton animation speed']}
+              weavePreset={controls['Weave preset']}
+              strandCount={controls['Strand count']}
+              strandSpacing={controls['Strand spacing']}
+              strandThickness={controls['Strand thickness']}
+              ribbonWidth={controls['Ribbon width']}
+              ribbonThickness={controls['Ribbon thickness']}
+              integrationLength={controls['Curve integration length']}
+              seedPattern={controls['Seed pattern']}
+              renderStyle={controls['Weave render style']}
+              rainbowIntensity={controls['Rainbow intensity']}
+              oilSlickIntensity={controls['Oil slick intensity']}
+              fiberDensity={controls['Fiber texture density']}
+              weaveBreathing={controls['Weave breathing']}
+              knotPreset={controls['Knot preset']}
+              knotScale={controls['Knot scale']}
+              boundaryTubeRadius={controls['Boundary tube radius']}
+              showBoundary={controls['Show boundary knot']}
+              showFilm={controls['Show film']}
+              filmOpacity={controls['Film opacity']}
+              smoothingIterations={controls['Film smoothing iterations']}
+              filmThickness={controls['Film thickness']}
+              filmMaterial={controls['Film material']}
+              torusP={controls['Torus p']}
+              torusQ={controls['Torus q']}
+              autoRotationSpeed={controls['Auto-rotation speed']}
+            />
+          ) : controls['Render mode'] === 'GPU continuous raymarch' ? (
             <GpuSurface
               settings={settings}
               colorMode={controls['Color mode']}
