@@ -33,8 +33,13 @@ npm run preview
 The Leva panel exposes:
 
 - Surface preset selection: Gyroid, Schwarz P, Diamond, Neovius
+- Render mode:
+  - GPU continuous raymarch
+  - CPU mesh debug
+- GPU ray steps
 - Optional morph target, morph path, morph amount, morph speed, and remesh rate
 - Animated A-to-B pulse or cyclic morphing through all surface families
+- Precomputed morph path step count and playback FPS
 - Iso-level / threshold
 - Resolution
 - Scale
@@ -54,11 +59,15 @@ The Leva panel exposes:
 - Auto-rotation speed
 - Wobble amplitude, speed, spatial scale, whole-object breathing, and psychedelic twist
 
+The `Create Morph Path` button opens Morph Path Studio, a popup that precomputes a discrete morph path, applies it to the renderer, and provides a scrubber plus play/pause controls.
+
 Orbit controls are enabled, so drag to rotate, scroll to zoom, and pan with the usual pointer gesture for your device.
 
 ## Implemented Equations
 
-The scalar fields are sampled as implicit surfaces and extracted with a shared-vertex marching-tetrahedra mesh generator. The TPMS level set is generated first, then triangles are clipped against the spherical crop. The crop sphere is not mixed into the scalar field, which keeps the membrane continuous instead of turning the boundary into a second competing implicit surface. Marching tetrahedra is used here because TPMS saddle fields trigger many ambiguous marching-cubes cases.
+The default renderer is GPU raymarching inside the spherical bounding volume. Each pixel traces a ray through the crop sphere and solves for the first zero crossing of the normalized implicit TPMS field. This avoids polygonal cracks and makes continuity the primary rendering contract.
+
+The CPU mesh debug renderer still samples the scalar fields as implicit surfaces and extracts shared-vertex marching-tetrahedra geometry. The TPMS level set is generated first, then triangles are clipped against the spherical crop. The crop sphere is not mixed into the scalar field, which keeps the membrane continuous instead of turning the boundary into a second competing implicit surface. Marching tetrahedra is used here because TPMS saddle fields trigger many ambiguous marching-cubes cases.
 
 ### Gyroid
 
@@ -93,6 +102,7 @@ f(x,y,z) = 3(cos(x) + cos(y) + cos(z)) + 4 cos(x) cos(y) cos(z)
 - `src/math/scalarFields.ts` defines reusable implicit scalar fields.
 - `src/math/implicitSurface.ts` samples the field, extracts shared-vertex triangle geometry with a face-consistent tetrahedral decomposition, and clips triangles to the spherical crop.
 - `src/rendering/surfaceMaterial.ts` contains the custom GLSL shader for rainbow bands, normal/radial coloring, fake glossy lighting, Fresnel glow, and crop-rim emphasis.
+- `src/rendering/raymarchMaterial.ts` contains the continuous GPU implicit renderer.
 - `src/components/Scene.tsx` wires the React Three Fiber scene, Leva controls, lighting, orbit controls, and animation.
 
 ## Screenshots
