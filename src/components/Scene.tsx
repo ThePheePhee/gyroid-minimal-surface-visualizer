@@ -16,35 +16,22 @@ const renderModeOptions = {
   'CPU mesh debug': 'CPU mesh debug',
 } as const;
 const morphPathOptions: Record<MorphPath, MorphPath> = {
+  'No morph': 'No morph',
   'A to B pulse': 'A to B pulse',
   'Cycle all families': 'Cycle all families',
 };
 
-interface MorphFrame {
-  index: number;
-  amount: number;
-  label: string;
-}
-
 export function Scene() {
-  const [morphFrames, setMorphFrames] = useState<MorphFrame[]>([]);
-  const [morphFrameIndex, setMorphFrameIndex] = useState(0);
-  const [morphPathOpen, setMorphPathOpen] = useState(false);
-  const [morphPathActive, setMorphPathActive] = useState(false);
-  const [morphPathPlaying, setMorphPathPlaying] = useState(false);
-
   const controls = useControls({
     'Render mode': { value: 'GPU continuous raymarch', options: renderModeOptions },
     'GPU ray steps': { value: 288, min: 128, max: 640, step: 16 },
     'Surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions },
     'Morph target': { value: 'Diamond' as SurfacePreset, options: presetOptions },
-    'Morph path': { value: 'A to B pulse' as MorphPath, options: morphPathOptions },
+    'Morph path': { value: 'No morph' as MorphPath, options: morphPathOptions },
     'Morph amount': { value: 0, min: 0, max: 1, step: 0.01 },
     'Animate morph': false,
     'Morph speed': { value: 0.08, min: 0.01, max: 0.5, step: 0.01 },
     'Morph remesh rate': { value: 10, min: 2, max: 20, step: 1 },
-    'Precomputed path steps': { value: 72, min: 8, max: 240, step: 1 },
-    'Path playback fps': { value: 16, min: 1, max: 48, step: 1 },
     'Iso-level / threshold': { value: 0, min: -0.7, max: 0.7, step: 0.01 },
     Resolution: { value: 64, min: 24, max: 96, step: 2 },
     Scale: { value: 2.25, min: 1.2, max: 4, step: 0.05 },
@@ -67,7 +54,7 @@ export function Scene() {
   const [autoMorph, setAutoMorph] = useState(0);
 
   useEffect(() => {
-    if (!controls['Animate morph']) {
+    if (!controls['Animate morph'] || controls['Morph path'] === 'No morph') {
       return undefined;
     }
 
@@ -94,49 +81,9 @@ export function Scene() {
     return () => window.cancelAnimationFrame(frameId);
   }, [autoMorph, controls]);
 
-  useEffect(() => {
-    if (!morphPathPlaying || morphFrames.length === 0) {
-      return undefined;
-    }
-
-    const configuredFps = Number(controls['Path playback fps']);
-    const fps = Math.max(1, Number.isFinite(configuredFps) ? configuredFps : 16);
-    const interval = window.setInterval(() => {
-      setMorphFrameIndex((index) => (index + 1) % morphFrames.length);
-    }, 1000 / fps);
-
-    return () => window.clearInterval(interval);
-  }, [controls, morphFrames.length, morphPathPlaying]);
-
-  const createMorphPath = () => {
-    const configuredSteps = Number(controls['Precomputed path steps']);
-    const steps = Math.max(2, Number.isFinite(configuredSteps) ? Math.round(configuredSteps) : 72);
-    const frames = Array.from({ length: steps }, (_, index) => {
-      const phase = steps === 1 ? 0 : index / (steps - 1);
-      const amount =
-        controls['Morph path'] === 'Cycle all families'
-          ? index / steps
-          : 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
-      return {
-        index,
-        amount,
-        label:
-          controls['Morph path'] === 'Cycle all families'
-            ? `cycle phase ${(amount * 100).toFixed(1)}%`
-            : `${controls['Surface preset']} to ${controls['Morph target']} pulse ${(amount * 100).toFixed(1)}%`,
-      };
-    });
-
-    setMorphFrames(frames);
-    setMorphFrameIndex(0);
-    setMorphPathActive(true);
-    setMorphPathPlaying(false);
-    setMorphPathOpen(true);
-  };
-
   const effectiveMorphAmount =
-    morphPathActive && morphFrames.length > 0
-      ? morphFrames[Math.min(morphFrameIndex, morphFrames.length - 1)].amount
+    controls['Morph path'] === 'No morph'
+      ? 0
       : controls['Animate morph']
         ? controls['Morph path'] === 'Cycle all families'
           ? autoMorph
@@ -213,55 +160,6 @@ export function Scene() {
         <span>TPMS visual instrument</span>
         <strong>Gyroid Minimal Surface Visualizer</strong>
       </div>
-      <div className="morph-launcher">
-        <button type="button" onClick={createMorphPath}>
-          Create Morph Path
-        </button>
-        {morphFrames.length > 0 && (
-          <button type="button" onClick={() => setMorphPathOpen(true)}>
-            Open Scrubber
-          </button>
-        )}
-      </div>
-      {morphPathOpen && morphFrames.length > 0 && (
-        <div className="morph-backdrop">
-          <section className="morph-popup" aria-label="Precomputed morph path">
-            <header>
-              <div>
-                <span>precomputed path</span>
-                <strong>Morph Path Studio</strong>
-              </div>
-              <button type="button" onClick={() => setMorphPathOpen(false)} aria-label="Close morph path studio">
-                x
-              </button>
-            </header>
-            <div className="morph-readout">
-              <span>
-                Frame {morphFrameIndex + 1} / {morphFrames.length}
-              </span>
-              <strong>{morphFrames[morphFrameIndex].label}</strong>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={morphFrames.length - 1}
-              value={morphFrameIndex}
-              onChange={(event) => {
-                setMorphFrameIndex(Number(event.currentTarget.value));
-                setMorphPathPlaying(false);
-              }}
-            />
-            <div className="morph-actions">
-              <button type="button" onClick={() => setMorphPathPlaying((playing) => !playing)}>
-                {morphPathPlaying ? 'Pause' : 'Play'}
-              </button>
-              <button type="button" onClick={() => setMorphPathActive((active) => !active)}>
-                {morphPathActive ? 'Use Live Controls' : 'Use This Path'}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
     </div>
   );
 }

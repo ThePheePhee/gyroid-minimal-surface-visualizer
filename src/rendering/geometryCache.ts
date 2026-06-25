@@ -1,7 +1,7 @@
 import { blendFields, getNormalizedScalarField, surfacePresets, type ScalarField, type SurfacePreset } from '../math/scalarFields';
 import { extractImplicitSurface } from '../math/implicitSurface';
 
-export type MorphPath = 'A to B pulse' | 'Cycle all families';
+export type MorphPath = 'No morph' | 'A to B pulse' | 'Cycle all families';
 
 export interface SurfaceSettings {
   preset: SurfacePreset;
@@ -33,6 +33,10 @@ export function buildSurfaceGeometry(settings: SurfaceSettings) {
 }
 
 function buildMorphedField(settings: SurfaceSettings): ScalarField {
+  if (settings.morphPath === 'No morph') {
+    return getNormalizedScalarField(settings.preset);
+  }
+
   if (settings.morphPath === 'Cycle all families') {
     const scaled = settings.morphAmount * surfacePresets.length;
     const fromIndex = Math.floor(scaled) % surfacePresets.length;

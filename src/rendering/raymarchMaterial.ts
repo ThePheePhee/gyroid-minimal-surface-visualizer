@@ -11,8 +11,9 @@ const surfaceIndex: Record<SurfacePreset, number> = {
 };
 
 const morphPathIndex: Record<MorphPath, number> = {
-  'A to B pulse': 0,
-  'Cycle all families': 1,
+  'No morph': 0,
+  'A to B pulse': 1,
+  'Cycle all families': 2,
 };
 
 const vertexShader = /* glsl */ `
@@ -138,18 +139,20 @@ const fragmentShader = /* glsl */ `
   float morphedField(vec3 p) {
     vec3 q = animatedDomain(p) * uFrequency;
     float value = 0.0;
-    if (uMorphPath == 1) {
+    if (uMorphPath == 2) {
       float scaled = fract(uMorphAmount) * 4.0;
       int fromIndex = int(floor(scaled));
       int toIndex = int(mod(float(fromIndex + 1), 4.0));
       float t = smootherstep(fract(scaled));
       value = mix(fieldByIndex(fromIndex, q), fieldByIndex(toIndex, q), t);
-    } else {
+    } else if (uMorphPath == 1) {
       value = mix(
         fieldByIndex(uPreset, q),
         fieldByIndex(uMorphTarget, q),
         smootherstep(uMorphAmount)
       );
+    } else {
+      value = fieldByIndex(uPreset, q);
     }
     return value - uIsoLevel;
   }

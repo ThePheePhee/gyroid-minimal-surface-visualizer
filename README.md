@@ -38,8 +38,10 @@ The Leva panel exposes:
   - CPU mesh debug
 - GPU ray steps
 - Optional morph target, morph path, morph amount, morph speed, and remesh rate
-- Animated A-to-B pulse or cyclic morphing through all surface families
-- Precomputed morph path step count and playback FPS
+- Morph path modes:
+  - no morph
+  - animated A-to-B pulse
+  - cyclic morphing through all surface families
 - Iso-level / threshold
 - Resolution
 - Scale
@@ -58,8 +60,6 @@ The Leva panel exposes:
 - Black background toggle
 - Auto-rotation speed
 - Wobble amplitude, speed, spatial scale, whole-object breathing, and psychedelic twist
-
-The `Create Morph Path` button opens Morph Path Studio, a popup that precomputes a discrete morph path, applies it to the renderer, and provides a scrubber plus play/pause controls.
 
 Orbit controls are enabled, so drag to rotate, scroll to zoom, and pan with the usual pointer gesture for your device.
 
