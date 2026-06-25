@@ -4,6 +4,13 @@ export type ScalarField = (x: number, y: number, z: number) => number;
 
 export const surfacePresets: SurfacePreset[] = ['Gyroid', 'Schwarz P', 'Diamond', 'Neovius'];
 
+const fieldNormalizers: Record<SurfacePreset, number> = {
+  Gyroid: 1.5,
+  'Schwarz P': 3,
+  Diamond: 2,
+  Neovius: 13,
+};
+
 export function getScalarField(preset: SurfacePreset): ScalarField {
   switch (preset) {
     case 'Schwarz P':
@@ -27,7 +34,17 @@ export function getScalarField(preset: SurfacePreset): ScalarField {
   }
 }
 
+export function getNormalizedScalarField(preset: SurfacePreset): ScalarField {
+  const field = getScalarField(preset);
+  const normalizer = fieldNormalizers[preset];
+  return (x, y, z) => field(x, y, z) / normalizer;
+}
+
 export function blendFields(a: ScalarField, b: ScalarField, amount: number): ScalarField {
-  const t = Math.min(1, Math.max(0, amount));
+  const t = smootherstep(Math.min(1, Math.max(0, amount)));
   return (x, y, z) => a(x, y, z) * (1 - t) + b(x, y, z) * t;
+}
+
+function smootherstep(t: number) {
+  return t * t * t * (t * (t * 6 - 15) + 10);
 }

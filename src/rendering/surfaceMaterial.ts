@@ -26,6 +26,10 @@ const vertexShader = /* glsl */ `
 
   uniform float uTime;
   uniform float uWobble;
+  uniform float uWobbleSpeed;
+  uniform float uWobbleScale;
+  uniform float uBreathing;
+  uniform float uTwist;
   uniform float uSurfaceThickness;
 
   void main() {
@@ -34,7 +38,16 @@ const vertexShader = /* glsl */ `
     vRadius = surfaceRadius;
     vGradient = surfaceGradient;
 
-    vec3 p = position + normal * (uSurfaceThickness * 0.65 + sin(uTime * 1.2 + length(position) * 4.0) * uWobble);
+    float t = uTime * uWobbleSpeed;
+    float wave = sin(t + length(position) * uWobbleScale);
+    wave += 0.45 * sin(t * 0.73 + dot(position, vec3(1.7, -0.8, 1.1)) * uWobbleScale * 0.72);
+    vec3 p = position + normal * (uSurfaceThickness * 0.65 + wave * uWobble);
+    p *= 1.0 + sin(t * 0.58) * uBreathing;
+
+    float twistAngle = p.z * uTwist * sin(t * 0.37);
+    float c = cos(twistAngle);
+    float s = sin(twistAngle);
+    p.xy = mat2(c, -s, s, c) * p.xy;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
   }
 `;
@@ -116,6 +129,10 @@ export function createSurfaceMaterial() {
     uniforms: {
       uTime: { value: 0 },
       uWobble: { value: 0 },
+      uWobbleSpeed: { value: 1 },
+      uWobbleScale: { value: 4 },
+      uBreathing: { value: 0 },
+      uTwist: { value: 0 },
       uSurfaceThickness: { value: 0 },
       uColorMode: { value: 0 },
       uRimStrength: { value: 1.2 },

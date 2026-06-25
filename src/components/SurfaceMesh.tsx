@@ -11,7 +11,11 @@ interface SurfaceMeshProps {
   smoothShading: boolean;
   wireframe: boolean;
   autoRotationSpeed: number;
-  wobble: number;
+  wobbleAmplitude: number;
+  wobbleSpeed: number;
+  wobbleScale: number;
+  breathing: number;
+  twist: number;
 }
 
 export function SurfaceMesh({
@@ -20,7 +24,11 @@ export function SurfaceMesh({
   smoothShading,
   wireframe,
   autoRotationSpeed,
-  wobble,
+  wobbleAmplitude,
+  wobbleSpeed,
+  wobbleScale,
+  breathing,
+  twist,
 }: SurfaceMeshProps) {
   const groupRef = useRef<THREE.Group>(null);
   const material = useMemo(() => createSurfaceMaterial(), []);
@@ -54,7 +62,11 @@ export function SurfaceMesh({
     }
 
     material.uniforms.uTime.value = state.clock.elapsedTime;
-    material.uniforms.uWobble.value = wobble;
+    material.uniforms.uWobble.value = wobbleAmplitude;
+    material.uniforms.uWobbleSpeed.value = wobbleSpeed;
+    material.uniforms.uWobbleScale.value = wobbleScale;
+    material.uniforms.uBreathing.value = breathing;
+    material.uniforms.uTwist.value = twist;
     material.uniforms.uSurfaceThickness.value = settings.shellThickness;
     material.uniforms.uCameraPosition.value.copy(camera.position);
   });

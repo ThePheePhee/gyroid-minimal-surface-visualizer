@@ -33,8 +33,8 @@ npm run preview
 The Leva panel exposes:
 
 - Surface preset selection: Gyroid, Schwarz P, Diamond, Neovius
-- Optional morph target and morph amount
-- Slow morphing toggle
+- Optional morph target, morph path, morph amount, morph speed, and remesh rate
+- Animated A-to-B pulse or cyclic morphing through all surface families
 - Iso-level / threshold
 - Resolution
 - Scale
@@ -52,13 +52,13 @@ The Leva panel exposes:
   - metallic white/gold rim emphasis
 - Black background toggle
 - Auto-rotation speed
-- Wobble / breathing animation
+- Wobble amplitude, speed, spatial scale, whole-object breathing, and psychedelic twist
 
 Orbit controls are enabled, so drag to rotate, scroll to zoom, and pan with the usual pointer gesture for your device.
 
 ## Implemented Equations
 
-The scalar fields are sampled as implicit surfaces and extracted with a marching-cubes mesh generator. The TPMS level set is generated first, then triangles are clipped against the spherical crop. The crop sphere is not mixed into the scalar field, which keeps the membrane continuous instead of turning the boundary into a second competing implicit surface.
+The scalar fields are sampled as implicit surfaces and extracted with a shared-vertex marching-tetrahedra mesh generator. The TPMS level set is generated first, then triangles are clipped against the spherical crop. The crop sphere is not mixed into the scalar field, which keeps the membrane continuous instead of turning the boundary into a second competing implicit surface. Marching tetrahedra is used here because TPMS saddle fields trigger many ambiguous marching-cubes cases.
 
 ### Gyroid
 
@@ -91,7 +91,7 @@ f(x,y,z) = 3(cos(x) + cos(y) + cos(z)) + 4 cos(x) cos(y) cos(z)
 ## Implementation Notes
 
 - `src/math/scalarFields.ts` defines reusable implicit scalar fields.
-- `src/math/marchingCubes.ts` samples the field, extracts shared-vertex triangle geometry, and clips triangles to the spherical crop.
+- `src/math/implicitSurface.ts` samples the field, extracts shared-vertex triangle geometry with a face-consistent tetrahedral decomposition, and clips triangles to the spherical crop.
 - `src/rendering/surfaceMaterial.ts` contains the custom GLSL shader for rainbow bands, normal/radial coloring, fake glossy lighting, Fresnel glow, and crop-rim emphasis.
 - `src/components/Scene.tsx` wires the React Three Fiber scene, Leva controls, lighting, orbit controls, and animation.
 

@@ -1,9 +1,5 @@
 import * as THREE from 'three';
-import { edgeTable as rawEdgeTable, triTable as rawTriTable } from 'three/examples/jsm/objects/MarchingCubes.js';
 import type { ScalarField } from './scalarFields';
-
-const edgeTable = rawEdgeTable as unknown as Int32Array;
-const triTable = rawTriTable as unknown as Int32Array;
 
 export interface SurfaceExtractionOptions {
   field: ScalarField;
@@ -19,6 +15,7 @@ export interface SurfaceExtractionOptions {
 type Vec3Tuple = [number, number, number];
 
 interface GridSample {
+  grid: Vec3Tuple;
   position: Vec3Tuple;
   value: number;
 }
@@ -36,59 +33,35 @@ interface ClipVertex extends MeshVertex {
 const cornerOffsets = [
   [0, 0, 0],
   [1, 0, 0],
-  [0, 1, 0],
   [1, 1, 0],
+  [0, 1, 0],
   [0, 0, 1],
   [1, 0, 1],
-  [0, 1, 1],
   [1, 1, 1],
+  [0, 1, 1],
 ] as const;
 
-const edgeCorners = [
-  [0, 1],
-  [1, 3],
-  [2, 3],
-  [0, 2],
-  [4, 5],
-  [5, 7],
-  [6, 7],
-  [4, 6],
-  [0, 4],
-  [1, 5],
-  [3, 7],
-  [2, 6],
-] as const;
-
-const xEdgeId = (x: number, y: number, z: number) => `x:${x}:${y}:${z}`;
-const yEdgeId = (x: number, y: number, z: number) => `y:${x}:${y}:${z}`;
-const zEdgeId = (x: number, y: number, z: number) => `z:${x}:${y}:${z}`;
-
-const edgeIdFactories = [
-  (x: number, y: number, z: number) => xEdgeId(x, y, z),
-  (x: number, y: number, z: number) => yEdgeId(x + 1, y, z),
-  (x: number, y: number, z: number) => xEdgeId(x, y + 1, z),
-  (x: number, y: number, z: number) => yEdgeId(x, y, z),
-  (x: number, y: number, z: number) => xEdgeId(x, y, z + 1),
-  (x: number, y: number, z: number) => yEdgeId(x + 1, y, z + 1),
-  (x: number, y: number, z: number) => xEdgeId(x, y + 1, z + 1),
-  (x: number, y: number, z: number) => yEdgeId(x, y, z + 1),
-  (x: number, y: number, z: number) => zEdgeId(x, y, z),
-  (x: number, y: number, z: number) => zEdgeId(x + 1, y, z),
-  (x: number, y: number, z: number) => zEdgeId(x + 1, y + 1, z),
-  (x: number, y: number, z: number) => zEdgeId(x, y + 1, z),
+// Freudenthal decomposition. It is face-consistent across neighboring cubes
+// and avoids the ambiguous saddle cases that produce cracks in vanilla MC.
+const tetrahedra = [
+  [0, 1, 3, 7],
+  [0, 1, 5, 7],
+  [0, 4, 5, 7],
+  [1, 2, 3, 7],
+  [1, 2, 6, 7],
+  [1, 5, 6, 7],
 ] as const;
 
 export function extractImplicitSurface(options: SurfaceExtractionOptions): THREE.BufferGeometry {
-  const resolution = Math.max(16, Math.min(96, Math.round(options.resolution)));
+  const resolution = Math.max(18, Math.min(104, Math.round(options.resolution)));
   const cropRadius = Math.max(0.1, options.cropRadius);
   const bounds = Math.max(options.scale, cropRadius) * 1.03;
   const step = (bounds * 2) / resolution;
   const samplesPerAxis = resolution + 1;
-  const sampleCount = samplesPerAxis ** 3;
-  const samples = new Array<GridSample>(sampleCount);
+  const samples = new Array<GridSample>(samplesPerAxis ** 3);
   const vertexCache = new Map<string, number>();
-  const meshVertices: MeshVertex[] = [];
-  const triangleIndices: number[] = [];
+  const vertices: MeshVertex[] = [];
+  const indices: number[] = [];
 
   const sampleIndex = (x: number, y: number, z: number) =>
     x + y * samplesPerAxis + z * samplesPerAxis * samplesPerAxis;
@@ -97,7 +70,7 @@ export function extractImplicitSurface(options: SurfaceExtractionOptions): THREE
     options.field(x * options.frequency, y * options.frequency, z * options.frequency) - options.isoLevel;
 
   const gradientMagnitude = (x: number, y: number, z: number) => {
-    const epsilon = step * 0.75;
+    const epsilon = step * 0.72;
     const dx = scalar(x + epsilon, y, z) - scalar(x - epsilon, y, z);
     const dy = scalar(x, y + epsilon, z) - scalar(x, y - epsilon, z);
     const dz = scalar(x, y, z + epsilon) - scalar(x, y, z - epsilon);
@@ -111,6 +84,7 @@ export function extractImplicitSurface(options: SurfaceExtractionOptions): THREE
         const py = -bounds + y * step;
         const pz = -bounds + z * step;
         samples[sampleIndex(x, y, z)] = {
+          grid: [x, y, z],
           position: [px, py, pz],
           value: scalar(px, py, pz),
         };
@@ -118,78 +92,83 @@ export function extractImplicitSurface(options: SurfaceExtractionOptions): THREE
     }
   }
 
-  const getVertex = (edge: number, x: number, y: number, z: number, corners: GridSample[]) => {
-    const cacheId = edgeIdFactories[edge](x, y, z);
+  const getVertex = (a: GridSample, b: GridSample) => {
+    const cacheId = edgeId(a.grid, b.grid);
     const cached = vertexCache.get(cacheId);
     if (cached !== undefined) {
       return cached;
     }
 
-    const [aIndex, bIndex] = edgeCorners[edge];
-    const a = corners[aIndex];
-    const b = corners[bIndex];
     const t = interpolateZero(a.value, b.value);
     const position: Vec3Tuple = [
       THREE.MathUtils.lerp(a.position[0], b.position[0], t),
       THREE.MathUtils.lerp(a.position[1], b.position[1], t),
       THREE.MathUtils.lerp(a.position[2], b.position[2], t),
     ];
-    const radius = Math.hypot(position[0], position[1], position[2]) / cropRadius;
-    const vertexIndex = meshVertices.length;
-    meshVertices.push({
+    const index = vertices.length;
+    vertices.push({
       position,
-      radius,
-      gradient: gradientMagnitude(position[0], position[1], position[2]),
+      radius: Math.hypot(...position) / cropRadius,
+      gradient: gradientMagnitude(...position),
     });
-    vertexCache.set(cacheId, vertexIndex);
-    return vertexIndex;
+    vertexCache.set(cacheId, index);
+    return index;
   };
 
   for (let z = 0; z < resolution; z += 1) {
     for (let y = 0; y < resolution; y += 1) {
       for (let x = 0; x < resolution; x += 1) {
-        const centerX = -bounds + (x + 0.5) * step;
-        const centerY = -bounds + (y + 0.5) * step;
-        const centerZ = -bounds + (z + 0.5) * step;
-        if (Math.hypot(centerX, centerY, centerZ) > cropRadius + step * 1.75) {
+        const center = [-bounds + (x + 0.5) * step, -bounds + (y + 0.5) * step, -bounds + (z + 0.5) * step];
+        if (Math.hypot(center[0], center[1], center[2]) > cropRadius + step * 1.9) {
           continue;
         }
 
         const corners = cornerOffsets.map(([ox, oy, oz]) => samples[sampleIndex(x + ox, y + oy, z + oz)]);
-        let cubeIndex = 0;
-        if (corners[0].value < 0) cubeIndex |= 1;
-        if (corners[1].value < 0) cubeIndex |= 2;
-        if (corners[2].value < 0) cubeIndex |= 8;
-        if (corners[3].value < 0) cubeIndex |= 4;
-        if (corners[4].value < 0) cubeIndex |= 16;
-        if (corners[5].value < 0) cubeIndex |= 32;
-        if (corners[6].value < 0) cubeIndex |= 128;
-        if (corners[7].value < 0) cubeIndex |= 64;
-
-        const bits = edgeTable[cubeIndex];
-        if (bits === 0) {
-          continue;
-        }
-
-        const edgeVertices = new Array<number>(12);
-        for (let edge = 0; edge < 12; edge += 1) {
-          if (bits & (1 << edge)) {
-            edgeVertices[edge] = getVertex(edge, x, y, z, corners);
-          }
-        }
-
-        const tableOffset = cubeIndex << 4;
-        for (let i = 0; triTable[tableOffset + i] !== -1; i += 3) {
-          const a = edgeVertices[triTable[tableOffset + i]];
-          const b = edgeVertices[triTable[tableOffset + i + 1]];
-          const c = edgeVertices[triTable[tableOffset + i + 2]];
-          triangleIndices.push(a, b, c);
+        for (const tetra of tetrahedra) {
+          polygonizeTetrahedron(
+            tetra.map((corner) => corners[corner]),
+            getVertex,
+            indices,
+          );
         }
       }
     }
   }
 
-  return buildClippedGeometry(meshVertices, triangleIndices, cropRadius);
+  return buildClippedGeometry(vertices, indices, cropRadius);
+}
+
+function polygonizeTetrahedron(
+  samples: GridSample[],
+  getVertex: (a: GridSample, b: GridSample) => number,
+  indices: number[],
+) {
+  const inside = samples.filter((sample) => sample.value < 0);
+  const outside = samples.filter((sample) => sample.value >= 0);
+
+  if (inside.length === 0 || inside.length === 4) {
+    return;
+  }
+
+  if (inside.length === 1) {
+    const [a] = inside;
+    indices.push(getVertex(a, outside[0]), getVertex(a, outside[1]), getVertex(a, outside[2]));
+    return;
+  }
+
+  if (inside.length === 3) {
+    const [a] = outside;
+    indices.push(getVertex(a, inside[2]), getVertex(a, inside[1]), getVertex(a, inside[0]));
+    return;
+  }
+
+  const [a, b] = inside;
+  const [c, d] = outside;
+  const ac = getVertex(a, c);
+  const ad = getVertex(a, d);
+  const bc = getVertex(b, c);
+  const bd = getVertex(b, d);
+  indices.push(ac, bc, bd, ac, bd, ad);
 }
 
 function buildClippedGeometry(vertices: MeshVertex[], indices: number[], cropRadius: number) {
@@ -275,6 +254,12 @@ function intersectSphere(a: ClipVertex, b: ClipVertex, cropRadius: number): Clip
     gradient: THREE.MathUtils.lerp(a.gradient, b.gradient, clamped),
     signedDistance: 0,
   };
+}
+
+function edgeId(a: Vec3Tuple, b: Vec3Tuple) {
+  const aKey = `${a[0]}:${a[1]}:${a[2]}`;
+  const bKey = `${b[0]}:${b[1]}:${b[2]}`;
+  return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
 }
 
 function interpolateZero(a: number, b: number) {

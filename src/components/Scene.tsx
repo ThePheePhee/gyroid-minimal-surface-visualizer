@@ -4,19 +4,27 @@ import { Leva, useControls } from 'leva';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { surfacePresets, type SurfacePreset } from '../math/scalarFields';
+import type { MorphPath } from '../rendering/geometryCache';
 import { colorModes, type ColorMode } from '../rendering/surfaceMaterial';
 import { SurfaceMesh } from './SurfaceMesh';
 
 const presetOptions = Object.fromEntries(surfacePresets.map((preset) => [preset, preset]));
 const colorOptions = Object.fromEntries(colorModes.map((mode) => [mode, mode]));
+const morphPathOptions: Record<MorphPath, MorphPath> = {
+  'A to B pulse': 'A to B pulse',
+  'Cycle all families': 'Cycle all families',
+};
 
 export function Scene() {
   const controls = useControls({
     'Surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions },
     'Morph target': { value: 'Diamond' as SurfacePreset, options: presetOptions },
+    'Morph path': { value: 'A to B pulse' as MorphPath, options: morphPathOptions },
     'Morph amount': { value: 0, min: 0, max: 1, step: 0.01 },
-    'Slow morphing': false,
-    'Iso-level / threshold': { value: 0, min: -1.5, max: 1.5, step: 0.01 },
+    'Animate morph': false,
+    'Morph speed': { value: 0.08, min: 0.01, max: 0.5, step: 0.01 },
+    'Morph remesh rate': { value: 10, min: 2, max: 20, step: 1 },
+    'Iso-level / threshold': { value: 0, min: -0.7, max: 0.7, step: 0.01 },
     Resolution: { value: 64, min: 24, max: 96, step: 2 },
     Scale: { value: 2.25, min: 1.2, max: 4, step: 0.05 },
     'Number of periods / spatial frequency': { value: 3.1, min: 0.8, max: 6, step: 0.05 },
@@ -28,29 +36,52 @@ export function Scene() {
     'Color mode': { value: 'rainbow curvature-like bands' as ColorMode, options: colorOptions },
     'Black background': true,
     'Auto-rotation speed': { value: 0.22, min: 0, max: 1.5, step: 0.01 },
-    'Wobble / breathing animation': { value: 0.018, min: 0, max: 0.12, step: 0.002 },
+    'Wobble amplitude': { value: 0.018, min: 0, max: 0.12, step: 0.002 },
+    'Wobble speed': { value: 1.15, min: 0.05, max: 4, step: 0.05 },
+    'Wobble spatial scale': { value: 4.2, min: 0.5, max: 12, step: 0.1 },
+    'Whole-object breathing': { value: 0.018, min: 0, max: 0.12, step: 0.002 },
+    'Psychedelic twist': { value: 0.035, min: 0, max: 0.5, step: 0.005 },
   });
 
   const [autoMorph, setAutoMorph] = useState(0);
 
   useEffect(() => {
-    if (!controls['Slow morphing']) {
+    if (!controls['Animate morph']) {
       return undefined;
     }
 
-    const interval = window.setInterval(() => {
-      setAutoMorph((value) => (value + 0.035) % 1);
-    }, 900);
+    let frameId = 0;
+    let phase = autoMorph;
+    let lastTime = performance.now();
+    let lastRemesh = lastTime;
+    const remeshInterval = 1000 / controls['Morph remesh rate'];
 
-    return () => window.clearInterval(interval);
-  }, [controls]);
+    const tick = (time: number) => {
+      const delta = Math.min(0.1, (time - lastTime) / 1000);
+      lastTime = time;
+      phase = (phase + delta * controls['Morph speed']) % 1;
+
+      if (time - lastRemesh >= remeshInterval) {
+        setAutoMorph(phase);
+        lastRemesh = time;
+      }
+
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [autoMorph, controls]);
 
   const settings = useMemo(
     () => ({
       preset: controls['Surface preset'],
       morphTarget: controls['Morph target'],
-      morphAmount: controls['Slow morphing']
-        ? 0.5 + 0.5 * Math.sin(autoMorph * Math.PI * 2)
+      morphPath: controls['Morph path'],
+      morphAmount: controls['Animate morph']
+        ? controls['Morph path'] === 'Cycle all families'
+          ? autoMorph
+          : 0.5 + 0.5 * Math.sin(autoMorph * Math.PI * 2)
         : controls['Morph amount'],
       isoLevel: controls['Iso-level / threshold'],
       resolution: controls.Resolution,
@@ -89,7 +120,11 @@ export function Scene() {
             smoothShading={controls['Smooth shading']}
             wireframe={controls.Wireframe}
             autoRotationSpeed={controls['Auto-rotation speed']}
-            wobble={controls['Wobble / breathing animation']}
+            wobbleAmplitude={controls['Wobble amplitude']}
+            wobbleSpeed={controls['Wobble speed']}
+            wobbleScale={controls['Wobble spatial scale']}
+            breathing={controls['Whole-object breathing']}
+            twist={controls['Psychedelic twist']}
           />
         </Suspense>
         <OrbitControls enableDamping dampingFactor={0.08} minDistance={2.4} maxDistance={10} />

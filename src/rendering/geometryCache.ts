@@ -1,10 +1,13 @@
-import { blendFields, getScalarField, type SurfacePreset } from '../math/scalarFields';
-import { extractImplicitSurface } from '../math/marchingCubes';
+import { blendFields, getNormalizedScalarField, surfacePresets, type ScalarField, type SurfacePreset } from '../math/scalarFields';
+import { extractImplicitSurface } from '../math/implicitSurface';
+
+export type MorphPath = 'A to B pulse' | 'Cycle all families';
 
 export interface SurfaceSettings {
   preset: SurfacePreset;
   morphTarget: SurfacePreset;
   morphAmount: number;
+  morphPath: MorphPath;
   isoLevel: number;
   resolution: number;
   scale: number;
@@ -15,9 +18,7 @@ export interface SurfaceSettings {
 }
 
 export function buildSurfaceGeometry(settings: SurfaceSettings) {
-  const baseField = getScalarField(settings.preset);
-  const targetField = getScalarField(settings.morphTarget);
-  const field = blendFields(baseField, targetField, settings.morphAmount);
+  const field = buildMorphedField(settings);
 
   return extractImplicitSurface({
     field,
@@ -29,4 +30,20 @@ export function buildSurfaceGeometry(settings: SurfaceSettings) {
     cropSoftness: settings.cropSoftness,
     shellThickness: settings.shellThickness,
   });
+}
+
+function buildMorphedField(settings: SurfaceSettings): ScalarField {
+  if (settings.morphPath === 'Cycle all families') {
+    const scaled = settings.morphAmount * surfacePresets.length;
+    const fromIndex = Math.floor(scaled) % surfacePresets.length;
+    const toIndex = (fromIndex + 1) % surfacePresets.length;
+    const localAmount = scaled - Math.floor(scaled);
+    return blendFields(
+      getNormalizedScalarField(surfacePresets[fromIndex]),
+      getNormalizedScalarField(surfacePresets[toIndex]),
+      localAmount,
+    );
+  }
+
+  return blendFields(getNormalizedScalarField(settings.preset), getNormalizedScalarField(settings.morphTarget), settings.morphAmount);
 }
