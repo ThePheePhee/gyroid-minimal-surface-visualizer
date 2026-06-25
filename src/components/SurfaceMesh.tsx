@@ -55,6 +55,7 @@ export function SurfaceMesh({
 
     material.uniforms.uTime.value = state.clock.elapsedTime;
     material.uniforms.uWobble.value = wobble;
+    material.uniforms.uSurfaceThickness.value = settings.shellThickness;
     material.uniforms.uCameraPosition.value.copy(camera.position);
   });
 

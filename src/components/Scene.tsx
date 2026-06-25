@@ -17,12 +17,12 @@ export function Scene() {
     'Morph amount': { value: 0, min: 0, max: 1, step: 0.01 },
     'Slow morphing': false,
     'Iso-level / threshold': { value: 0, min: -1.5, max: 1.5, step: 0.01 },
-    Resolution: { value: 44, min: 18, max: 72, step: 2 },
+    Resolution: { value: 64, min: 24, max: 96, step: 2 },
     Scale: { value: 2.25, min: 1.2, max: 4, step: 0.05 },
-    'Number of periods / spatial frequency': { value: 2.75, min: 0.8, max: 6, step: 0.05 },
-    'Spherical crop radius': { value: 2.05, min: 0.6, max: 3.8, step: 0.03 },
+    'Number of periods / spatial frequency': { value: 3.1, min: 0.8, max: 6, step: 0.05 },
+    'Spherical crop radius': { value: 2.08, min: 0.6, max: 3.8, step: 0.03 },
     'Crop softness': { value: 0.09, min: 0.01, max: 0.5, step: 0.01 },
-    'Visual shell thickness': { value: 0.075, min: 0.015, max: 0.26, step: 0.005 },
+    'Visual shell thickness': { value: 0.04, min: 0, max: 0.16, step: 0.005 },
     Wireframe: false,
     'Smooth shading': true,
     'Color mode': { value: 'rainbow curvature-like bands' as ColorMode, options: colorOptions },
@@ -69,7 +69,6 @@ export function Scene() {
       <Canvas
         gl={{
           antialias: true,
-          toneMapping: THREE.ACESFilmicToneMapping,
           outputColorSpace: THREE.SRGBColorSpace,
         }}
       >

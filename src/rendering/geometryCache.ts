@@ -1,5 +1,5 @@
 import { blendFields, getScalarField, type SurfacePreset } from '../math/scalarFields';
-import { extractImplicitSurface } from '../math/marchingTetrahedra';
+import { extractImplicitSurface } from '../math/marchingCubes';
 
 export interface SurfaceSettings {
   preset: SurfacePreset;

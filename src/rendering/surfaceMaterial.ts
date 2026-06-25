@@ -26,6 +26,7 @@ const vertexShader = /* glsl */ `
 
   uniform float uTime;
   uniform float uWobble;
+  uniform float uSurfaceThickness;
 
   void main() {
     vPosition = position;
@@ -33,7 +34,7 @@ const vertexShader = /* glsl */ `
     vRadius = surfaceRadius;
     vGradient = surfaceGradient;
 
-    vec3 p = position + normal * sin(uTime * 1.2 + length(position) * 4.0) * uWobble;
+    vec3 p = position + normal * (uSurfaceThickness * 0.65 + sin(uTime * 1.2 + length(position) * 4.0) * uWobble);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
   }
 `;
@@ -66,14 +67,15 @@ const fragmentShader = /* glsl */ `
     vec3 viewDir = normalize(uCameraPosition - vPosition);
     vec3 lightDir = normalize(vec3(-0.35, 0.75, 0.55));
     float diffuse = max(dot(n, lightDir), 0.0);
+    float backLight = max(dot(n, normalize(vec3(0.6, -0.45, -0.7))), 0.0);
     float tunnel = smoothstep(0.05, 0.95, 1.0 - abs(n.z * 0.45 + n.y * 0.35));
     float radialBand = vRadius * 1.65;
     float curveBand = vGradient * 1.2 + length(vPosition.xy) * 0.18 - vPosition.z * 0.08;
 
     vec3 base;
     if (uColorMode == 0) {
-      base = palette(curveBand + sin(vPosition.x * 3.0 + vPosition.y * 2.0) * 0.04);
-      base = mix(base, vec3(0.02, 0.55, 0.95), tunnel * 0.35);
+      base = palette(0.18 + curveBand * 0.72 + sin(vPosition.x * 3.0 + vPosition.y * 2.0) * 0.035);
+      base = mix(base, vec3(0.0, 0.62, 0.92), tunnel * 0.28);
     } else if (uColorMode == 1) {
       base = palette(radialBand - 0.15 + sin(vPosition.z * 4.0) * 0.035);
     } else if (uColorMode == 2) {
@@ -92,13 +94,13 @@ const fragmentShader = /* glsl */ `
     float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
     float cropRim = smoothstep(0.88, 1.0, vRadius);
     vec3 rimColor = mix(vec3(0.9, 0.88, 0.78), vec3(1.0, 0.82, 0.36), 0.35 + 0.25 * sin(uTime * 0.6));
-    vec3 lit = base * (0.18 + diffuse * 0.95);
+    vec3 lit = base * (0.32 + diffuse * 0.78 + backLight * 0.22);
 
     vec3 halfDir = normalize(lightDir + viewDir);
-    float specular = pow(max(dot(n, halfDir), 0.0), 70.0);
-    lit += vec3(specular) * 1.8;
-    lit += rimColor * (fresnel * 1.4 + cropRim * cropRim * 1.1) * uRimStrength;
-    lit += base * 0.18;
+    float specular = pow(max(dot(n, halfDir), 0.0), 90.0);
+    lit += vec3(specular) * 0.9;
+    lit += rimColor * (fresnel * 0.42 + cropRim * cropRim * 0.72) * uRimStrength;
+    lit += base * 0.1;
 
     float alpha = uColorMode == 3 ? 0.86 : 1.0;
     gl_FragColor = vec4(lit, alpha);
@@ -114,6 +116,7 @@ export function createSurfaceMaterial() {
     uniforms: {
       uTime: { value: 0 },
       uWobble: { value: 0 },
+      uSurfaceThickness: { value: 0 },
       uColorMode: { value: 0 },
       uRimStrength: { value: 1.2 },
       uCameraPosition: { value: new THREE.Vector3() },

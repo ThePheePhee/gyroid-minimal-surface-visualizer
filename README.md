@@ -58,7 +58,7 @@ Orbit controls are enabled, so drag to rotate, scroll to zoom, and pan with the 
 
 ## Implemented Equations
 
-The scalar fields are sampled as implicit surfaces and extracted with a marching-tetrahedra mesh generator.
+The scalar fields are sampled as implicit surfaces and extracted with a marching-cubes mesh generator. The TPMS level set is generated first, then triangles are clipped against the spherical crop. The crop sphere is not mixed into the scalar field, which keeps the membrane continuous instead of turning the boundary into a second competing implicit surface.
 
 ### Gyroid
 
@@ -91,7 +91,7 @@ f(x,y,z) = 3(cos(x) + cos(y) + cos(z)) + 4 cos(x) cos(y) cos(z)
 ## Implementation Notes
 
 - `src/math/scalarFields.ts` defines reusable implicit scalar fields.
-- `src/math/marchingTetrahedra.ts` samples the field and extracts triangle geometry inside a soft spherical crop.
+- `src/math/marchingCubes.ts` samples the field, extracts shared-vertex triangle geometry, and clips triangles to the spherical crop.
 - `src/rendering/surfaceMaterial.ts` contains the custom GLSL shader for rainbow bands, normal/radial coloring, fake glossy lighting, Fresnel glow, and crop-rim emphasis.
 - `src/components/Scene.tsx` wires the React Three Fiber scene, Leva controls, lighting, orbit controls, and animation.
 
@@ -101,7 +101,7 @@ The `screenshots/` folder is included as a placeholder. The browser verification
 
 ## TODOs
 
-- Add true boundary-loop extraction and tube geometry for cleaner metallic crop rims.
+- Add explicit boundary-loop extraction and tube geometry for cleaner metallic crop rims.
 - Add GPU-side field sampling or web-worker extraction for very high resolutions.
 - Add export to `.glb` / `.obj`.
 - Add saved presets for specific gyroid, Schwarz P, diamond, and Neovius looks.
