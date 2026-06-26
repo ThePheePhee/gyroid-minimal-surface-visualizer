@@ -31,38 +31,79 @@ export function createSurfaceValue(options: {
 }
 
 export type ScrewPhaseOptions = {
-  mode: 'Off' | 'Single Defect' | 'Paired Defects';
+  mode: 'Off' | 'Single Defect' | 'Paired Defects' | 'Helical Corkscrew' | 'Spiral Pinch' | 'Thorn Crown';
   strength: number;
   coreRadius: number;
+  turns?: number;
+  pinch?: number;
+  sharpness?: number;
 };
 
-// approximate: this is a coordinate-domain phase defect, not a minimal-surface deformation.
+// Smooth coordinate-domain vortex deformation. It avoids direct angular phase
+// offsets, so the map has no theta branch cut even at high screw strengths.
 export function applyScrewPhase(p: THREE.Vector3, options?: ScrewPhaseOptions) {
   const q = p.clone();
-  if (!options || options.mode === 'Off' || Math.abs(options.strength) < 1e-6) {
+  if (!options || options.mode === 'Off') {
     return q;
   }
 
   const core = Math.max(0.05, options.coreRadius);
-  const defects =
-    options.mode === 'Paired Defects'
-      ? [
-          { x: -core, y: 0, sign: 1 },
-          { x: core, y: 0, sign: -1 },
-        ]
-      : [{ x: 0, y: 0, sign: 1 }];
+  const turns = Math.max(0.05, options.turns ?? 2.6);
+  const pinch = options.pinch ?? 0.25;
+  if (Math.abs(options.strength) < 1e-6 && Math.abs(pinch) < 1e-6) {
+    return q;
+  }
+  const sharpness = Math.max(1, options.sharpness ?? 3.2);
+  const defects = screwDefects(options.mode, core);
 
-  let phase = 0;
   for (const defect of defects) {
     const dx = q.x - defect.x;
     const dy = q.y - defect.y;
-    const falloff = 1 - Math.exp(-(dx * dx + dy * dy) / (core * core));
-    phase += defect.sign * Math.atan2(dy, dx) * falloff;
+    const r = Math.hypot(dx, dy);
+    const normalized = r / core;
+    const focus = Math.exp(-Math.pow(normalized, sharpness));
+    const helixPhase = q.z * turns * Math.PI * 2 + defect.phase;
+    const helicalMix =
+      options.mode === 'Helical Corkscrew' || options.mode === 'Spiral Pinch' || options.mode === 'Thorn Crown'
+        ? 0.55 + 0.45 * Math.sin(helixPhase)
+        : 1;
+    const angle = defect.sign * options.strength * focus * (1.15 + helicalMix);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const rx = cos * dx - sin * dy;
+    const ry = sin * dx + cos * dy;
+    const pinchWave = 0.65 + 0.35 * Math.cos(helixPhase);
+    const pinchGain = options.mode === 'Spiral Pinch' || options.mode === 'Thorn Crown' ? 0.62 : 0.22;
+    const radialScale = Math.max(0.06, 1 - pinch * focus * pinchGain * pinchWave);
+    q.x = defect.x + rx * radialScale;
+    q.y = defect.y + ry * radialScale;
+    q.z += defect.sign * options.strength * focus * 0.08 * Math.sin(helixPhase) + pinch * focus * 0.06 * Math.cos(helixPhase);
   }
 
-  q.x += options.strength * phase;
-  q.z += options.strength * 0.35 * Math.sin(phase);
   return q;
+}
+
+function screwDefects(mode: ScrewPhaseOptions['mode'], core: number) {
+  if (mode === 'Paired Defects') {
+    return [
+      { x: -core, y: 0, sign: 1, phase: 0 },
+      { x: core, y: 0, sign: -1, phase: Math.PI },
+    ];
+  }
+
+  if (mode === 'Thorn Crown') {
+    return Array.from({ length: 6 }, (_, index) => {
+      const angle = (index / 6) * Math.PI * 2;
+      return {
+        x: Math.cos(angle) * core * 1.25,
+        y: Math.sin(angle) * core * 1.25,
+        sign: index % 2 === 0 ? 1 : -1,
+        phase: angle,
+      };
+    });
+  }
+
+  return [{ x: 0, y: 0, sign: 1, phase: 0 }];
 }
 
 export function evaluateSurfaceJet(value: SurfaceValue, p: THREE.Vector3, epsilon: number): SurfaceJet {

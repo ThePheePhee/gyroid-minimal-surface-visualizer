@@ -43,6 +43,9 @@ export interface DeveloperOverlaySettings {
   screwPhase: ScrewPhaseOptions['mode'];
   screwStrength: number;
   screwCoreRadius: number;
+  screwTurns: number;
+  screwPinch: number;
+  screwSharpness: number;
   minimalityDiagnostic: boolean;
   complementSide: 'positive labyrinth' | 'negative labyrinth';
   autoRotationSpeed: number;
@@ -63,8 +66,18 @@ export function DeveloperOverlays({
       mode: developer.screwPhase,
       strength: developer.screwStrength,
       coreRadius: developer.screwCoreRadius,
+      turns: developer.screwTurns,
+      pinch: developer.screwPinch,
+      sharpness: developer.screwSharpness,
     }),
-    [developer.screwCoreRadius, developer.screwPhase, developer.screwStrength],
+    [
+      developer.screwCoreRadius,
+      developer.screwPhase,
+      developer.screwPinch,
+      developer.screwSharpness,
+      developer.screwStrength,
+      developer.screwTurns,
+    ],
   );
   const value = useMemo(
     () =>

@@ -24,6 +24,9 @@ export type DeveloperRaymarchSettings = {
   screwPhase: number;
   screwStrength: number;
   screwCoreRadius: number;
+  screwTurns: number;
+  screwPinch: number;
+  screwSharpness: number;
   minimalityDiagnostic: boolean;
 };
 
@@ -80,6 +83,9 @@ export const screwPhaseIndex: Record<string, number> = {
   Off: 0,
   'Single Defect': 1,
   'Paired Defects': 2,
+  'Helical Corkscrew': 3,
+  'Spiral Pinch': 4,
+  'Thorn Crown': 5,
 };
 
 const surfaceFieldSources: Record<SurfacePreset, { fn: string; source: string }> = {
@@ -283,6 +289,9 @@ const fragmentShader = /* glsl */ `
   uniform int uDevScrewMode;
   uniform float uDevScrewStrength;
   uniform float uDevScrewCoreRadius;
+  uniform float uDevScrewTurns;
+  uniform float uDevScrewPinch;
+  uniform float uDevScrewSharpness;
   uniform int uDevMinimalityDiagnostic;
 
   const int MAX_STEPS = 768;
@@ -461,27 +470,51 @@ const fragmentShader = /* glsl */ `
 
   vec3 developerDomain(vec3 p) {
     p = animatedDomain(p);
-    if (uDeveloperMode == 1 && uDevScrewMode != 0 && abs(uDevScrewStrength) > 0.0001) {
-      float core = max(0.08, uDevScrewCoreRadius);
-      float phase = 0.0;
-      int defectCount = uDevScrewMode == 2 ? 2 : 1;
+    if (
+      uDeveloperMode == 1 &&
+      uDevScrewMode != 0 &&
+      (abs(uDevScrewStrength) > 0.0001 || abs(uDevScrewPinch) > 0.0001)
+    ) {
+      float core = max(0.05, uDevScrewCoreRadius);
+      int defectCount = uDevScrewMode == 5 ? 6 : (uDevScrewMode == 2 ? 2 : 1);
+      float sharpness = clamp(uDevScrewSharpness, 1.0, 8.0);
+      float turns = max(0.05, uDevScrewTurns);
 
-      for (int i = 0; i < 2; i++) {
+      for (int i = 0; i < 6; i++) {
         if (i >= defectCount) break;
-        vec2 center = i == 0
-          ? (uDevScrewMode == 2 ? vec2(-core, 0.0) : vec2(0.0, 0.0))
-          : vec2(core, 0.0);
-        float defectSign = i == 0 ? 1.0 : -1.0;
-        vec2 delta = p.xy - center;
-        float r2 = dot(delta, delta);
-        float falloff = 1.0 - exp(-r2 / (core * core));
-        phase += defectSign * atan(delta.y, delta.x) * falloff;
-      }
+        vec2 center = vec2(0.0);
+        float defectSign = 1.0;
+        float defectPhase = float(i) * 1.2566371;
+        if (uDevScrewMode == 2) {
+          center = i == 0 ? vec2(-core, 0.0) : vec2(core, 0.0);
+          defectSign = i == 0 ? 1.0 : -1.0;
+          defectPhase = i == 0 ? 0.0 : 3.1415926;
+        } else if (uDevScrewMode == 5) {
+          float crownAngle = 6.2831853 * float(i) / 6.0 + uDevStripPhase * 6.2831853;
+          center = vec2(cos(crownAngle), sin(crownAngle)) * core * 1.25;
+          defectSign = mod(float(i), 2.0) < 0.5 ? 1.0 : -1.0;
+          defectPhase = crownAngle;
+        }
 
-      float twistAmount = uDevScrewStrength * phase;
-      p.x += twistAmount;
-      p.z += 0.35 * uDevScrewStrength * sin(phase);
-      p.xy = rotate2d(0.25 * twistAmount) * p.xy;
+        vec2 delta = p.xy - center;
+        float r = length(delta);
+        float focus = exp(-pow(max(r / max(core, 0.001), 0.0), sharpness));
+        float helicalPhase =
+          p.z * turns * 6.2831853 +
+          uDevStripPhase * 6.2831853 +
+          defectPhase;
+        bool helicalMode = uDevScrewMode == 3 || uDevScrewMode == 4 || uDevScrewMode == 5;
+        float helicalMix = helicalMode ? 0.55 + 0.45 * sin(helicalPhase) : 1.0;
+        float angle = defectSign * uDevScrewStrength * focus * (1.15 + helicalMix);
+        vec2 rotated = rotate2d(angle) * delta;
+        float pinchWave = 0.65 + 0.35 * cos(helicalPhase);
+        float pinchGain = (uDevScrewMode == 4 || uDevScrewMode == 5) ? 0.62 : 0.22;
+        float radialScale = max(0.06, 1.0 - uDevScrewPinch * focus * pinchGain * pinchWave);
+        p.xy = center + rotated * radialScale;
+        p.z +=
+          defectSign * uDevScrewStrength * focus * 0.08 * sin(helicalPhase) +
+          uDevScrewPinch * focus * 0.06 * cos(helicalPhase);
+      }
     }
     return p;
   }
@@ -1121,31 +1154,110 @@ function cycleMorphedFieldBlock() {
 
 function liveDeveloperDomainBlock() {
   return /* glsl */ `
+  vec2 screwDefectCenter(int index, float core) {
+    if (uDevScrewMode == 2) {
+      return index == 0 ? vec2(-core, 0.0) : vec2(core, 0.0);
+    }
+    if (uDevScrewMode == 5) {
+      float angle = 6.2831853 * float(index) / 6.0 + uDevStripPhase * 6.2831853;
+      return vec2(cos(angle), sin(angle)) * core * 1.25;
+    }
+    return vec2(0.0);
+  }
+
+  float screwDefectSign(int index) {
+    if (uDevScrewMode == 2) {
+      return index == 0 ? 1.0 : -1.0;
+    }
+    if (uDevScrewMode == 5) {
+      return mod(float(index), 2.0) < 0.5 ? 1.0 : -1.0;
+    }
+    return 1.0;
+  }
+
+  int screwDefectCount() {
+    if (uDevScrewMode == 2) return 2;
+    if (uDevScrewMode == 5) return 6;
+    return 1;
+  }
+
+  float screwFocus(float r, float core) {
+    float sharpness = clamp(uDevScrewSharpness, 1.0, 8.0);
+    return exp(-pow(max(r / max(core, 0.001), 0.0), sharpness));
+  }
+
+  vec3 applySmoothScrewDefect(vec3 p, int index, float core) {
+    vec2 center = screwDefectCenter(index, core);
+    float sign = screwDefectSign(index);
+    vec2 delta = p.xy - center;
+    float r = length(delta);
+    float focus = screwFocus(r, core);
+    float turns = max(0.05, uDevScrewTurns);
+    float helicalPhase =
+      p.z * turns * 6.2831853 +
+      uDevStripPhase * 6.2831853 +
+      float(index) * 1.2566371;
+    bool helicalMode = uDevScrewMode == 3 || uDevScrewMode == 4 || uDevScrewMode == 5;
+    float helicalMix = helicalMode ? 0.55 + 0.45 * sin(helicalPhase) : 1.0;
+    float angle = sign * uDevScrewStrength * focus * (1.15 + helicalMix);
+    vec2 rotated = rotate2d(angle) * delta;
+    float pinchWave = 0.65 + 0.35 * cos(helicalPhase);
+    float pinchGain = (uDevScrewMode == 4 || uDevScrewMode == 5) ? 0.62 : 0.22;
+    float radialScale = max(0.06, 1.0 - uDevScrewPinch * focus * pinchGain * pinchWave);
+    p.xy = center + rotated * radialScale;
+    p.z +=
+      sign * uDevScrewStrength * focus * 0.08 * sin(helicalPhase) +
+      uDevScrewPinch * focus * 0.06 * cos(helicalPhase);
+    return p;
+  }
+
   vec3 developerDomain(vec3 p) {
     p = animatedDomain(p);
-    if (uDeveloperMode == 1 && uDevScrewMode != 0 && abs(uDevScrewStrength) > 0.0001) {
-      float core = max(0.08, uDevScrewCoreRadius);
-      float phase = 0.0;
-      int defectCount = uDevScrewMode == 2 ? 2 : 1;
-
-      for (int i = 0; i < 2; i++) {
+    if (
+      uDeveloperMode == 1 &&
+      uDevScrewMode != 0 &&
+      (abs(uDevScrewStrength) > 0.0001 || abs(uDevScrewPinch) > 0.0001)
+    ) {
+      float core = max(0.05, uDevScrewCoreRadius);
+      int defectCount = screwDefectCount();
+      for (int i = 0; i < 6; i++) {
         if (i >= defectCount) break;
-        vec2 center = i == 0
-          ? (uDevScrewMode == 2 ? vec2(-core, 0.0) : vec2(0.0, 0.0))
-          : vec2(core, 0.0);
-        float defectSign = i == 0 ? 1.0 : -1.0;
-        vec2 delta = p.xy - center;
-        float r2 = dot(delta, delta);
-        float falloff = 1.0 - exp(-r2 / (core * core));
-        phase += defectSign * atan(delta.y, delta.x) * falloff;
+        p = applySmoothScrewDefect(p, i, core);
       }
-
-      float twistAmount = uDevScrewStrength * phase;
-      p.x += twistAmount;
-      p.z += 0.35 * uDevScrewStrength * sin(phase);
-      p.xy = rotate2d(0.25 * twistAmount) * p.xy;
     }
     return p;
+  }
+
+  float developerScrewRelief(vec3 p) {
+    if (uDeveloperMode != 1 || uDevScrewMode == 0) {
+      return 0.0;
+    }
+
+    float core = max(0.05, uDevScrewCoreRadius);
+    float turns = max(0.05, uDevScrewTurns);
+    float relief = 0.0;
+    int defectCount = screwDefectCount();
+    for (int i = 0; i < 6; i++) {
+      if (i >= defectCount) break;
+      vec2 center = screwDefectCenter(i, core);
+      float sign = screwDefectSign(i);
+      vec2 delta = p.xy - center;
+      float r = length(delta);
+      vec2 direction = delta / max(r, 0.0001);
+      float coreFade = smoothstep(0.0, core * 0.16, r);
+      float focus = screwFocus(r, core) * coreFade;
+      float phase =
+        p.z * turns * 6.2831853 +
+        uDevStripPhase * 6.2831853 +
+        float(i) * 1.2566371;
+      vec2 helixDirection = vec2(cos(phase), sin(phase));
+      float spiralArm = dot(direction, helixDirection);
+      float thorn = pow(max(0.0, 0.5 + 0.5 * spiralArm), clamp(uDevScrewSharpness, 1.0, 8.0));
+      float modeGain = (uDevScrewMode == 4 || uDevScrewMode == 5) ? 1.55 : 1.0;
+      relief += sign * focus * spiralArm * abs(uDevScrewStrength) * 0.035;
+      relief += focus * thorn * uDevScrewPinch * 0.07 * modeGain;
+    }
+    return relief;
   }
 `;
 }
@@ -1187,6 +1299,7 @@ ${liveDeveloperDomainBlock()}
   float morphedField(vec3 p) {
     vec3 q = developerDomain(p) * uFrequency;
     float base = morphedBaseValue(q) - uIsoLevel;
+    base += developerScrewRelief(p);
     if (uDeveloperMode == 1 && uDevParallelMode == 1) {
       base -= uDevOffsetDistance;
     } else if (uDeveloperMode == 1 && uDevParallelMode == 3) {
@@ -1239,6 +1352,7 @@ ${liveDeveloperDomainBlock()}
   float morphedField(vec3 p) {
     vec3 q = developerDomain(p) * uFrequency;
     float base = morphedBaseValue(q) - uIsoLevel;
+    base += developerScrewRelief(p);
     if (uDeveloperMode == 1 && uDevParallelMode == 1) {
       base -= uDevOffsetDistance;
     } else if (uDeveloperMode == 1 && uDevParallelMode == 3) {
@@ -1387,6 +1501,9 @@ export function createRaymarchMaterial(settings: RaymarchShaderSettings) {
       uDevScrewMode: { value: 0 },
       uDevScrewStrength: { value: 0 },
       uDevScrewCoreRadius: { value: 0.7 },
+      uDevScrewTurns: { value: 2.6 },
+      uDevScrewPinch: { value: 0.25 },
+      uDevScrewSharpness: { value: 3.2 },
       uDevMinimalityDiagnostic: { value: 1 },
     },
   });
@@ -1455,6 +1572,9 @@ export function updateRaymarchMaterial(
     uniforms.uDevScrewMode.value = options.developer.screwPhase;
     uniforms.uDevScrewStrength.value = options.developer.screwStrength;
     uniforms.uDevScrewCoreRadius.value = options.developer.screwCoreRadius;
+    uniforms.uDevScrewTurns.value = options.developer.screwTurns;
+    uniforms.uDevScrewPinch.value = options.developer.screwPinch;
+    uniforms.uDevScrewSharpness.value = options.developer.screwSharpness;
     uniforms.uDevMinimalityDiagnostic.value = options.developer.minimalityDiagnostic ? 1 : 0;
   }
   uniforms.uRimStrength.value =
