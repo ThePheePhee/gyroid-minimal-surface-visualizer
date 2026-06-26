@@ -214,17 +214,11 @@ export function Scene() {
   const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
     whenKnot(get) && get('Knot Relationship Type') === type;
   const developerLabLabel = developerActive
-    ? isOpera
-      ? 'Developer Lab active (Opera safe) ->'
-      : 'Developer Lab active ->'
+    ? 'Developer Lab active ->'
     : 'Developer Lab ->';
   const developerToggleLabel = developerActive
-    ? isOpera
-      ? 'Disable Opera-safe developer geometry'
-      : 'Disable live developer geometry'
-    : isOpera
-      ? 'Enable Opera-safe developer geometry'
-      : 'Enable live developer geometry';
+    ? 'Disable live developer geometry'
+    : 'Enable live developer geometry';
   const [controls, setControls] = useControls(
     () => ({
       ...(controlPage === 'main'
@@ -234,11 +228,6 @@ export function Scene() {
         : {
             '<- Main controls': button(() => setControlPage('main')),
             [developerToggleLabel]: button(() => setDeveloperActive((active) => !active)),
-            ...(isOpera
-              ? {
-                  'Full curvature diagnostics disabled in Opera': button(() => undefined, { disabled: true }),
-                }
-              : {}),
           }),
       'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions, render: whenMain },
       'Render mode': { value: defaultRenderMode, options: renderModeOptions, render: whenSurface },
@@ -354,7 +343,7 @@ export function Scene() {
   }, [controls, defaultRaySteps, isOpera, setControls]);
 
   const developerRuntimeEnabled = developerActive;
-  const developerShaderMode = developerRuntimeEnabled ? (isOpera ? 'safe' : 'full') : 'off';
+  const developerShaderMode = developerRuntimeEnabled ? 'live' : 'off';
   const effectiveRaySteps = isOpera
     ? Math.min(controls['GPU ray steps'], defaultRaySteps)
     : controls['GPU ray steps'];

@@ -4,7 +4,7 @@ import type { MorphPath } from './geometryCache';
 import type { SurfacePreset } from '../math/scalarFields';
 
 export type ComplementSide = 'positive labyrinth' | 'negative labyrinth';
-export type DeveloperShaderMode = 'off' | 'safe' | 'full';
+export type DeveloperShaderMode = 'off' | 'live';
 
 export type DeveloperRaymarchSettings = {
   enabled: boolean;
@@ -941,11 +941,8 @@ const fragmentShader = /* glsl */ `
 
 function buildFragmentShader(settings: RaymarchShaderSettings) {
   if (settings.morphPath === 'Cycle all families') {
-    if (settings.developerShaderMode === 'full') {
-      return fragmentShader;
-    }
-    if (settings.developerShaderMode === 'safe') {
-      return buildSafeFragmentShader(fragmentShader, safeCycleMorphedFieldBlock());
+    if (settings.developerShaderMode === 'live') {
+      return buildLiveFragmentShader(fragmentShader, liveCycleMorphedFieldBlock());
     }
     return buildLeanFragmentShader(fragmentShader, cycleMorphedFieldBlock());
   }
@@ -1081,14 +1078,10 @@ function buildFragmentShader(settings: RaymarchShaderSettings) {
     .replace(/ {2}float gyroid\(vec3 p\) \{[\s\S]*? {2}vec3 animatedDomain/, fieldSection)
     .replace(/ {2}float morphedBaseValue\(vec3 q\) \{[\s\S]*? {2}bool raySphere/, morphedBaseValue);
 
-  if (settings.developerShaderMode === 'full') {
-    return shader;
-  }
-
-  if (settings.developerShaderMode === 'safe') {
-    return buildSafeFragmentShader(
+  if (settings.developerShaderMode === 'live') {
+    return buildLiveFragmentShader(
       shader,
-      safeMorphedFieldBlock(settings.morphPath, presetField, targetField),
+      liveMorphedFieldBlock(settings.morphPath, presetField, targetField),
     );
   }
 
@@ -1126,7 +1119,7 @@ function cycleMorphedFieldBlock() {
   bool raySphere`;
 }
 
-function safeDeveloperDomainBlock() {
+function liveDeveloperDomainBlock() {
   return /* glsl */ `
   vec3 developerDomain(vec3 p) {
     p = animatedDomain(p);
@@ -1157,9 +1150,9 @@ function safeDeveloperDomainBlock() {
 `;
 }
 
-function safeCycleMorphedFieldBlock() {
+function liveCycleMorphedFieldBlock() {
   return /* glsl */ `
-${safeDeveloperDomainBlock()}
+${liveDeveloperDomainBlock()}
   float selectedDeveloperBaseField(vec3 q) {
     float scaled = fract(uMorphAmount) * SURFACE_COUNT;
     int fromIndex = int(floor(scaled));
@@ -1208,14 +1201,14 @@ ${safeDeveloperDomainBlock()}
   bool raySphere`;
 }
 
-function safeMorphedFieldBlock(morphPath: MorphPath, presetField: string, targetField: string) {
+function liveMorphedFieldBlock(morphPath: MorphPath, presetField: string, targetField: string) {
   const selectedField =
     morphPath === 'A to B pulse'
       ? `mix(${presetField}(q), ${targetField}(q), smootherstep(uMorphAmount))`
       : `${presetField}(q)`;
 
   return /* glsl */ `
-${safeDeveloperDomainBlock()}
+${liveDeveloperDomainBlock()}
   float selectedDeveloperBaseField(vec3 q) {
     return ${selectedField};
   }
@@ -1260,7 +1253,7 @@ ${safeDeveloperDomainBlock()}
   bool raySphere`;
 }
 
-function safeDeveloperColorBlock() {
+function liveDeveloperColorBlock() {
   return /* glsl */ `
   vec3 developerHeat(float t) {
     t = clamp(t, 0.0, 1.0);
@@ -1316,7 +1309,7 @@ function safeDeveloperColorBlock() {
   bool findSurface`;
 }
 
-function buildSafeFragmentShader(shader: string, morphedFieldBlock: string) {
+function buildLiveFragmentShader(shader: string, morphedFieldBlock: string) {
   return shader
     .replace(
       / {2}vec3 developerDomain\(vec3 p\) \{[\s\S]*? {2}bool raySphere/,
@@ -1324,7 +1317,7 @@ function buildSafeFragmentShader(shader: string, morphedFieldBlock: string) {
     )
     .replace(
       / {2}void curvatureDiagnostics\(vec3 p, out float meanError, out float gaussian, out float curvatureMagnitude, out float focalDistance\) \{[\s\S]*? {2}bool findSurface/,
-      safeDeveloperColorBlock(),
+      liveDeveloperColorBlock(),
     );
 }
 
