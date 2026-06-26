@@ -123,7 +123,7 @@ const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
 export function Scene() {
   const isOpera = typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent);
   const maxDevicePixelRatio = isOpera ? 1 : 1.25;
-  const defaultRaySteps = isOpera ? 128 : 192;
+  const defaultRaySteps = isOpera ? 96 : 192;
   const defaultRenderMode = 'GPU continuous raymarch';
   const [controls, setControls] = useControls(
     () => ({
@@ -315,6 +315,21 @@ export function Scene() {
   }, [setControls]);
 
   useEffect(() => {
+    if (isOpera && controls['Developer Mode']) {
+      setControls({ 'Developer Mode': false });
+    }
+
+    if (isOpera && controls['GPU ray steps'] > defaultRaySteps) {
+      setControls({ 'GPU ray steps': defaultRaySteps });
+    }
+  }, [controls, defaultRaySteps, isOpera, setControls]);
+
+  const developerRuntimeEnabled = controls['Developer Mode'] && !isOpera;
+  const effectiveRaySteps = isOpera
+    ? Math.min(controls['GPU ray steps'], defaultRaySteps)
+    : controls['GPU ray steps'];
+
+  useEffect(() => {
     if (!controls['Animate morph'] || controls['Morph path'] === 'No morph') {
       return undefined;
     }
@@ -441,7 +456,7 @@ export function Scene() {
 
   const developerRaymarchSettings = useMemo<DeveloperRaymarchSettings>(
     () => ({
-      enabled: controls['Developer Mode'] && controls['Visualization Mode'] === 'Surface Mode',
+      enabled: developerRuntimeEnabled && controls['Visualization Mode'] === 'Surface Mode',
       geometryOverlay: geometryOverlayIndex[developerSettings.geometryOverlay],
       overlayStrength: developerSettings.overlayStrength,
       finiteDifferenceEpsilon: developerSettings.finiteDifferenceEpsilon,
@@ -459,7 +474,7 @@ export function Scene() {
       screwCoreRadius: developerSettings.screwCoreRadius,
       minimalityDiagnostic: developerSettings.minimalityDiagnostic,
     }),
-    [controls, developerSettings],
+    [controls, developerRuntimeEnabled, developerSettings],
   );
 
   return (
@@ -531,7 +546,7 @@ export function Scene() {
             <GpuSurface
               settings={settings}
               colorMode={controls['Color mode']}
-              raySteps={controls['GPU ray steps']}
+              raySteps={effectiveRaySteps}
               autoRotationSpeed={controls['Auto-rotation speed']}
               wobbleAmplitude={controls['Wobble amplitude']}
               wobbleSpeed={controls['Wobble speed']}
@@ -556,7 +571,7 @@ export function Scene() {
               twist={controls['Psychedelic twist']}
             />
           )}
-          {controls['Developer Mode'] && controls['Visualization Mode'] === 'Surface Mode' && (
+          {developerRuntimeEnabled && controls['Visualization Mode'] === 'Surface Mode' && (
             <DeveloperOverlays settings={settings} developer={developerSettings} />
           )}
         </Suspense>

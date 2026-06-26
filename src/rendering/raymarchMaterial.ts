@@ -29,6 +29,7 @@ type RaymarchShaderSettings = {
   preset: SurfacePreset;
   morphTarget: SurfacePreset;
   morphPath: MorphPath;
+  developerEnabled: boolean;
 };
 
 const surfaceIndex: Record<SurfacePreset, number> = {
@@ -938,7 +939,7 @@ const fragmentShader = /* glsl */ `
 
 function buildFragmentShader(settings: RaymarchShaderSettings) {
   if (settings.morphPath === 'Cycle all families') {
-    return fragmentShader;
+    return settings.developerEnabled ? fragmentShader : buildLeanFragmentShader(fragmentShader, cycleMorphedFieldBlock());
   }
 
   const requiredPresets = [settings.preset, 'Gyroid' as SurfacePreset, 'Schwarz P' as SurfacePreset, 'Diamond' as SurfacePreset];
@@ -1068,9 +1069,67 @@ function buildFragmentShader(settings: RaymarchShaderSettings) {
 
   bool raySphere`;
 
-  return fragmentShader
+  const shader = fragmentShader
     .replace(/ {2}float gyroid\(vec3 p\) \{[\s\S]*? {2}vec3 animatedDomain/, fieldSection)
     .replace(/ {2}float morphedBaseValue\(vec3 q\) \{[\s\S]*? {2}bool raySphere/, morphedBaseValue);
+
+  if (settings.developerEnabled) {
+    return shader;
+  }
+
+  const leanMorphedField =
+    settings.morphPath === 'A to B pulse'
+      ? /* glsl */ `
+  float morphedField(vec3 p) {
+    vec3 q = animatedDomain(p) * uFrequency;
+    return mix(${presetField}(q), ${targetField}(q), smootherstep(uMorphAmount)) - uIsoLevel;
+  }
+
+  bool raySphere`
+      : /* glsl */ `
+  float morphedField(vec3 p) {
+    vec3 q = animatedDomain(p) * uFrequency;
+    return ${presetField}(q) - uIsoLevel;
+  }
+
+  bool raySphere`;
+
+  return buildLeanFragmentShader(shader, leanMorphedField);
+}
+
+function cycleMorphedFieldBlock() {
+  return /* glsl */ `
+  float morphedField(vec3 p) {
+    vec3 q = animatedDomain(p) * uFrequency;
+    float scaled = fract(uMorphAmount) * SURFACE_COUNT;
+    int fromIndex = int(floor(scaled));
+    int toIndex = int(mod(float(fromIndex + 1), SURFACE_COUNT));
+    float t = smootherstep(fract(scaled));
+    return mix(fieldByIndex(fromIndex, q), fieldByIndex(toIndex, q), t) - uIsoLevel;
+  }
+
+  bool raySphere`;
+}
+
+function buildLeanFragmentShader(shader: string, morphedFieldBlock: string) {
+  return shader
+    .replace(
+      / {2}uniform int uDeveloperMode;[\s\S]*? {2}uniform int uDevMinimalityDiagnostic;\n/,
+      '',
+    )
+    .replace(
+      / {2}vec3 developerDomain\(vec3 p\) \{[\s\S]*? {2}bool raySphere/,
+      morphedFieldBlock,
+    )
+    .replace(
+      / {2}void curvatureDiagnostics\(vec3 p, out float meanError, out float gaussian, out float curvatureMagnitude, out float focalDistance\) \{[\s\S]*? {2}bool findSurface/,
+      /* glsl */ `
+  vec3 applyDeveloperSurfaceColor(vec3 color, vec3 position, vec3 normal) {
+    return color;
+  }
+
+  bool findSurface`,
+    );
 }
 
 export function createRaymarchMaterial(settings: RaymarchShaderSettings) {
@@ -1169,23 +1228,25 @@ export function updateRaymarchMaterial(
   uniforms.uSurfaceThickness.value = settings.shellThickness;
   uniforms.uComplementMode.value = options.complementSolid ? 1 : 0;
   uniforms.uComplementSide.value = options.complementSide === 'negative labyrinth' ? -1 : 1;
-  uniforms.uDeveloperMode.value = options.developer.enabled ? 1 : 0;
-  uniforms.uDevGeometryOverlay.value = options.developer.geometryOverlay;
-  uniforms.uDevOverlayStrength.value = options.developer.overlayStrength;
-  uniforms.uDevFiniteDifferenceEpsilon.value = options.developer.finiteDifferenceEpsilon;
-  uniforms.uDevBonnetMode.value = options.developer.bonnetStripMode;
-  uniforms.uDevBonnetParameter.value = options.developer.bonnetParameter;
-  uniforms.uDevStripPhase.value = options.developer.stripPhase;
-  uniforms.uDevStripWidth.value = options.developer.stripWidth;
-  uniforms.uDevBaseSurfaceFade.value = options.developer.baseSurfaceFade;
-  uniforms.uDevParallelMode.value = options.developer.parallelFocalMode;
-  uniforms.uDevOffsetDistance.value = options.developer.offsetDistance;
-  uniforms.uDevCausticStrength.value = options.developer.causticStrength;
-  uniforms.uDevPointinessClamp.value = options.developer.pointinessClamp;
-  uniforms.uDevScrewMode.value = options.developer.screwPhase;
-  uniforms.uDevScrewStrength.value = options.developer.screwStrength;
-  uniforms.uDevScrewCoreRadius.value = options.developer.screwCoreRadius;
-  uniforms.uDevMinimalityDiagnostic.value = options.developer.minimalityDiagnostic ? 1 : 0;
+  if (uniforms.uDeveloperMode) {
+    uniforms.uDeveloperMode.value = options.developer.enabled ? 1 : 0;
+    uniforms.uDevGeometryOverlay.value = options.developer.geometryOverlay;
+    uniforms.uDevOverlayStrength.value = options.developer.overlayStrength;
+    uniforms.uDevFiniteDifferenceEpsilon.value = options.developer.finiteDifferenceEpsilon;
+    uniforms.uDevBonnetMode.value = options.developer.bonnetStripMode;
+    uniforms.uDevBonnetParameter.value = options.developer.bonnetParameter;
+    uniforms.uDevStripPhase.value = options.developer.stripPhase;
+    uniforms.uDevStripWidth.value = options.developer.stripWidth;
+    uniforms.uDevBaseSurfaceFade.value = options.developer.baseSurfaceFade;
+    uniforms.uDevParallelMode.value = options.developer.parallelFocalMode;
+    uniforms.uDevOffsetDistance.value = options.developer.offsetDistance;
+    uniforms.uDevCausticStrength.value = options.developer.causticStrength;
+    uniforms.uDevPointinessClamp.value = options.developer.pointinessClamp;
+    uniforms.uDevScrewMode.value = options.developer.screwPhase;
+    uniforms.uDevScrewStrength.value = options.developer.screwStrength;
+    uniforms.uDevScrewCoreRadius.value = options.developer.screwCoreRadius;
+    uniforms.uDevMinimalityDiagnostic.value = options.developer.minimalityDiagnostic ? 1 : 0;
+  }
   uniforms.uRimStrength.value =
     options.colorMode === 'metallic white/gold rim emphasis'
       ? 2.2
