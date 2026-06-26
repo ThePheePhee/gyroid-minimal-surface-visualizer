@@ -74,7 +74,7 @@ export function Scene() {
   const isOpera = typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent);
   const maxDevicePixelRatio = isOpera ? 1 : 1.25;
   const defaultRaySteps = isOpera ? 128 : 192;
-  const defaultRenderMode = isOpera ? 'CPU mesh debug' : 'GPU continuous raymarch';
+  const defaultRenderMode = 'GPU continuous raymarch';
   const controls = useControls({
     'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions },
     'Render mode': { value: defaultRenderMode, options: renderModeOptions, render: whenSurface },
