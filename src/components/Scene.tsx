@@ -213,18 +213,32 @@ export function Scene() {
     whenKnot(get) && get('Knot Relationship Type') !== 'Knot-Bounded Minimal Film';
   const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
     whenKnot(get) && get('Knot Relationship Type') === type;
+  const developerLabLabel = developerActive
+    ? isOpera
+      ? 'Developer Lab active (Opera safe) ->'
+      : 'Developer Lab active ->'
+    : 'Developer Lab ->';
+  const developerToggleLabel = developerActive
+    ? isOpera
+      ? 'Disable Opera-safe developer overlays'
+      : 'Disable live developer geometry'
+    : isOpera
+      ? 'Enable Opera-safe developer overlays'
+      : 'Enable live developer geometry';
   const [controls, setControls] = useControls(
     () => ({
       ...(controlPage === 'main'
         ? {
-            [developerActive ? 'Developer Lab active ->' : 'Developer Lab ->']: button(() =>
-              setControlPage('developer'),
-            ),
+            [developerLabLabel]: button(() => setControlPage('developer')),
           }
         : {
             '<- Main controls': button(() => setControlPage('main')),
-            [developerActive ? 'Disable live developer geometry' : 'Enable live developer geometry']:
-              button(() => setDeveloperActive((active) => !active)),
+            [developerToggleLabel]: button(() => setDeveloperActive((active) => !active)),
+            ...(isOpera
+              ? {
+                  'GPU shader lab disabled in Opera': button(() => undefined, { disabled: true }),
+                }
+              : {}),
           }),
       'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions, render: whenMain },
       'Render mode': { value: defaultRenderMode, options: renderModeOptions, render: whenSurface },
@@ -317,7 +331,7 @@ export function Scene() {
       ? { 'Differential Geometry / Ribbon Lab': developerLabControls }
       : {}),
     }),
-    [controlPage, defaultRaySteps, defaultRenderMode, developerActive],
+    [controlPage, defaultRaySteps, defaultRenderMode, developerActive, developerLabLabel, developerToggleLabel, isOpera],
   );
 
   const [autoMorph, setAutoMorph] = useState(0);
@@ -340,6 +354,7 @@ export function Scene() {
   }, [controls, defaultRaySteps, isOpera, setControls]);
 
   const developerRuntimeEnabled = developerActive;
+  const developerGpuShaderEnabled = developerRuntimeEnabled && !isOpera;
   const effectiveRaySteps = isOpera
     ? Math.min(controls['GPU ray steps'], defaultRaySteps)
     : controls['GPU ray steps'];
@@ -475,7 +490,7 @@ export function Scene() {
 
   const developerRaymarchSettings = useMemo<DeveloperRaymarchSettings>(
     () => ({
-      enabled: developerRuntimeEnabled && controls['Visualization Mode'] === 'Surface Mode',
+      enabled: developerGpuShaderEnabled && controls['Visualization Mode'] === 'Surface Mode',
       geometryOverlay: geometryOverlayIndex[developerSettings.geometryOverlay],
       overlayStrength: developerSettings.overlayStrength,
       finiteDifferenceEpsilon: developerSettings.finiteDifferenceEpsilon,
@@ -493,7 +508,7 @@ export function Scene() {
       screwCoreRadius: developerSettings.screwCoreRadius,
       minimalityDiagnostic: developerSettings.minimalityDiagnostic,
     }),
-    [controls, developerRuntimeEnabled, developerSettings],
+    [controls, developerGpuShaderEnabled, developerSettings],
   );
 
   return (
