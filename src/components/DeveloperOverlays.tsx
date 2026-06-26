@@ -4,8 +4,6 @@ import * as THREE from 'three';
 import { createSurfaceValue, type ScrewPhaseOptions } from '../math/differentialGeometry';
 import {
   buildBonnetStripCurves,
-  buildDiagnosticGeometry,
-  buildFocalPointGeometry,
   buildLabyrinthSkeletonApproximation,
   buildRibbonGeometryFromCurves,
   traceSurfaceRibbons,
@@ -18,7 +16,6 @@ import {
 } from '../math/surfaceTracing';
 import { buildMorphedField, type SurfaceSettings } from '../rendering/geometryCache';
 import { createRibbonMaterial } from '../rendering/ribbonMaterial';
-import { TpmsPreviewSurface } from './TpmsPreviewSurface';
 
 export interface DeveloperOverlaySettings {
   geometryOverlay: GeometryOverlay;
@@ -79,29 +76,6 @@ export function DeveloperOverlays({
       }),
     [field, settings.frequency, settings.isoLevel, screw],
   );
-
-  const diagnostic = useMemo(() => {
-    const overlay =
-      developer.minimalityDiagnostic && developer.screwPhase !== 'Off'
-        ? 'Minimality Error'
-        : developer.geometryOverlay;
-    if (overlay === 'Off') return null;
-    return buildDiagnosticGeometry({
-      value,
-      cropRadius: settings.cropRadius,
-      overlay,
-      epsilon: developer.finiteDifferenceEpsilon,
-      strength: developer.overlayStrength,
-    });
-  }, [
-    developer.finiteDifferenceEpsilon,
-    developer.geometryOverlay,
-    developer.minimalityDiagnostic,
-    developer.overlayStrength,
-    developer.screwPhase,
-    settings.cropRadius,
-    value,
-  ]);
 
   const ribbonGeometry = useMemo(() => {
     if (developer.ribbonField === 'Off') return null;
@@ -178,57 +152,42 @@ export function DeveloperOverlays({
     value,
   ]);
 
-  const focalGeometry = useMemo(() => {
-    if (developer.parallelFocalMode === 'Off') return null;
-    return buildFocalPointGeometry({
-      value,
-      cropRadius: settings.cropRadius,
-      epsilon: developer.finiteDifferenceEpsilon,
-      mode: developer.parallelFocalMode,
-      offsetDistance: developer.offsetDistance,
-      causticStrength: developer.causticStrength,
-      pointinessClamp: developer.pointinessClamp,
-    });
-  }, [
-    developer.causticStrength,
-    developer.finiteDifferenceEpsilon,
-    developer.offsetDistance,
-    developer.parallelFocalMode,
-    developer.pointinessClamp,
-    settings.cropRadius,
-    value,
-  ]);
-
   const ribbonMaterial = useMemo(
-    () =>
-      createRibbonMaterial({
+    () => {
+      const material = createRibbonMaterial({
         look: 1,
         rainbowIntensity: 0.95,
         oilSlickIntensity: 0.72,
         fiberDensity: 32,
-      }),
+      });
+      material.depthTest = false;
+      material.depthWrite = false;
+      return material;
+    },
     [],
   );
   const stripMaterial = useMemo(
-    () =>
-      createRibbonMaterial({
+    () => {
+      const material = createRibbonMaterial({
         look: 3,
         rainbowIntensity: 0.65,
         oilSlickIntensity: 0.45,
         fiberDensity: 18,
-      }),
+      });
+      material.depthTest = false;
+      material.depthWrite = false;
+      return material;
+    },
     [],
   );
 
   useEffect(
     () => () => {
-      diagnostic?.geometry.dispose();
       ribbonGeometry?.dispose();
       stripGeometry?.dispose();
       skeletonGeometry?.dispose();
-      focalGeometry?.dispose();
     },
-    [diagnostic, focalGeometry, ribbonGeometry, skeletonGeometry, stripGeometry],
+    [ribbonGeometry, skeletonGeometry, stripGeometry],
   );
   useEffect(() => () => ribbonMaterial.dispose(), [ribbonMaterial]);
   useEffect(() => () => stripMaterial.dispose(), [stripMaterial]);
@@ -246,53 +205,27 @@ export function DeveloperOverlays({
 
   return (
     <group ref={groupRef}>
-      {developer.baseSurfaceFade > 0 && developer.bonnetStripMode !== 'Off' && (
-        <TpmsPreviewSurface
-          settings={settings}
-          visible
-          opacity={developer.baseSurfaceFade * 0.35}
-          color={developer.bonnetStripMode === 'Approx P-G-D Blend' ? '#ffe0a6' : '#94eaff'}
-        />
-      )}
-      {diagnostic && diagnostic.kind === 'points' && (
-        <points geometry={diagnostic.geometry}>
-          <pointsMaterial size={0.018 + developer.overlayStrength * 0.018} vertexColors transparent opacity={0.86} />
-        </points>
-      )}
-      {diagnostic && diagnostic.kind === 'lines' && (
-        <lineSegments geometry={diagnostic.geometry}>
-          <lineBasicMaterial vertexColors transparent opacity={0.45 + developer.overlayStrength * 0.45} />
-        </lineSegments>
-      )}
-      {ribbonGeometry && <mesh geometry={ribbonGeometry} material={ribbonMaterial} />}
-      {stripGeometry && <mesh geometry={stripGeometry} material={stripMaterial} />}
+      {ribbonGeometry && <mesh geometry={ribbonGeometry} material={ribbonMaterial} renderOrder={40} />}
+      {stripGeometry && <mesh geometry={stripGeometry} material={stripMaterial} renderOrder={41} />}
       {skeletonGeometry && developer.labyrinthSkeleton === 'Distance Ridge Points' && (
-        <points geometry={skeletonGeometry}>
+        <points geometry={skeletonGeometry} renderOrder={42}>
           <pointsMaterial
             size={developer.skeletonThickness}
             vertexColors
             transparent
             opacity={developer.skeletonVisibility}
+            depthTest={false}
           />
         </points>
       )}
       {skeletonGeometry && developer.labyrinthSkeleton === 'Ribbonized Skeleton' && (
-        <points geometry={skeletonGeometry}>
+        <points geometry={skeletonGeometry} renderOrder={42}>
           <pointsMaterial
             size={developer.skeletonThickness * 1.8}
             color="#a9fbff"
             transparent
             opacity={developer.skeletonVisibility}
-          />
-        </points>
-      )}
-      {focalGeometry && (
-        <points geometry={focalGeometry}>
-          <pointsMaterial
-            size={developer.parallelFocalMode === 'Offset Surface' ? 0.014 : 0.026}
-            vertexColors
-            transparent
-            opacity={0.5 + developer.causticStrength * 0.35}
+            depthTest={false}
           />
         </points>
       )}

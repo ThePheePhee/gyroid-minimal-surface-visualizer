@@ -7,7 +7,14 @@ import { surfacePresets, type SurfacePreset } from '../math/scalarFields';
 import type { FilmMaterial, KnotPreset } from '../math/knotGeometry';
 import type { WeavePreset, WeaveRenderStyle } from '../math/weaveCurves';
 import type { MorphPath } from '../rendering/geometryCache';
-import type { ComplementSide } from '../rendering/raymarchMaterial';
+import {
+  bonnetStripModeIndex,
+  geometryOverlayIndex,
+  parallelFocalModeIndex,
+  screwPhaseIndex,
+  type ComplementSide,
+  type DeveloperRaymarchSettings,
+} from '../rendering/raymarchMaterial';
 import { colorModes, type ColorMode } from '../rendering/surfaceMaterial';
 import { DeveloperOverlays } from './DeveloperOverlays';
 import type { DeveloperOverlaySettings } from './DeveloperOverlays';
@@ -432,6 +439,29 @@ export function Scene() {
     [controls],
   );
 
+  const developerRaymarchSettings = useMemo<DeveloperRaymarchSettings>(
+    () => ({
+      enabled: controls['Developer Mode'] && controls['Visualization Mode'] === 'Surface Mode',
+      geometryOverlay: geometryOverlayIndex[developerSettings.geometryOverlay],
+      overlayStrength: developerSettings.overlayStrength,
+      finiteDifferenceEpsilon: developerSettings.finiteDifferenceEpsilon,
+      bonnetStripMode: bonnetStripModeIndex[developerSettings.bonnetStripMode],
+      bonnetParameter: developerSettings.bonnetParameter,
+      stripPhase: developerSettings.stripPhase,
+      stripWidth: developerSettings.stripWidth,
+      baseSurfaceFade: developerSettings.baseSurfaceFade,
+      parallelFocalMode: parallelFocalModeIndex[developerSettings.parallelFocalMode],
+      offsetDistance: developerSettings.offsetDistance,
+      causticStrength: developerSettings.causticStrength,
+      pointinessClamp: developerSettings.pointinessClamp,
+      screwPhase: screwPhaseIndex[developerSettings.screwPhase],
+      screwStrength: developerSettings.screwStrength,
+      screwCoreRadius: developerSettings.screwCoreRadius,
+      minimalityDiagnostic: developerSettings.minimalityDiagnostic,
+    }),
+    [controls, developerSettings],
+  );
+
   return (
     <div className="app-shell" data-black={controls['Black background']}>
       <Leva collapsed={false} oneLineLabels />
@@ -510,6 +540,7 @@ export function Scene() {
               twist={controls['Psychedelic twist']}
               complementSolid={controls['Complement solid']}
               complementSide={controls['Complement side']}
+              developer={developerRaymarchSettings}
             />
           ) : (
             <SurfaceMesh

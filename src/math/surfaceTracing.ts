@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import {
   evaluateSurfaceJet,
-  jetScalar,
   projectToSurface,
   type SurfaceValue,
 } from './differentialGeometry';
@@ -75,60 +74,6 @@ export function traceSurfaceRibbons(options: {
       }),
     )
     .filter((points) => points.length > 3);
-}
-
-export function buildDiagnosticGeometry(options: {
-  value: SurfaceValue;
-  cropRadius: number;
-  overlay: GeometryOverlay;
-  epsilon: number;
-  strength: number;
-}) {
-  const points = makeSurfaceSeeds({
-    value: options.value,
-    cropRadius: options.cropRadius,
-    count: options.overlay.includes('Directions') ? 90 : 420,
-    epsilon: options.epsilon,
-  });
-
-  if (options.overlay === 'Principal Directions' || options.overlay === 'Asymptotic Directions') {
-    const positions: number[] = [];
-    const colors: number[] = [];
-    const cyan = new THREE.Color('#28f5ff');
-    const magenta = new THREE.Color('#ff49d8');
-    const length = 0.08 + options.strength * 0.12;
-    for (const p of points) {
-      const jet = evaluateSurfaceJet(options.value, p, options.epsilon);
-      const directions =
-        options.overlay === 'Principal Directions' ? jet.principalDirections : jet.asymptoticDirections;
-      addSegment(positions, colors, p, directions[0], length, cyan);
-      addSegment(positions, colors, p, directions[1], length, magenta);
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    return { kind: 'lines' as const, geometry };
-  }
-
-  const positions: number[] = [];
-  const colors: number[] = [];
-  for (const p of points) {
-    const jet = evaluateSurfaceJet(options.value, p, options.epsilon);
-    const scalar =
-      options.overlay === 'Minimality Error'
-        ? jetScalar(jet, 'minimality')
-        : options.overlay === 'Focal Distance'
-          ? jetScalar(jet, 'focalDistance')
-          : jetScalar(jet, 'curvatureMagnitude');
-    const color = diagnosticColor(scalar, options.overlay);
-    const lifted = p.clone().addScaledVector(jet.normal, 0.012);
-    positions.push(lifted.x, lifted.y, lifted.z);
-    colors.push(color.r, color.g, color.b);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  return { kind: 'points' as const, geometry };
 }
 
 export function buildRibbonGeometryFromCurves(curves: THREE.Vector3[][], options: {
@@ -258,41 +203,6 @@ export function buildLabyrinthSkeletonApproximation(options: {
   return geometry;
 }
 
-export function buildFocalPointGeometry(options: {
-  value: SurfaceValue;
-  cropRadius: number;
-  epsilon: number;
-  mode: ParallelFocalMode;
-  offsetDistance: number;
-  causticStrength: number;
-  pointinessClamp: number;
-}) {
-  const points = makeSurfaceSeeds({
-    value: options.value,
-    cropRadius: options.cropRadius,
-    count: 360,
-    epsilon: options.epsilon,
-  });
-  const positions: number[] = [];
-  const colors: number[] = [];
-  for (const p of points) {
-    const jet = evaluateSurfaceJet(options.value, p, options.epsilon);
-    const curvature = Math.max(Math.abs(jet.principalCurvatures[0]), Math.abs(jet.principalCurvatures[1]));
-    const focalDistance = 1 / Math.max(0.03, curvature);
-    const nearCaustic = 1 - Math.min(1, Math.abs(focalDistance - Math.abs(options.offsetDistance)) / Math.max(0.05, options.pointinessClamp));
-    if (options.mode === 'Focal Highlight' && nearCaustic < 0.35) continue;
-    const scalar = options.mode === 'Near-Caustic Shell' ? nearCaustic * options.causticStrength : 0;
-    const point = p.clone().addScaledVector(jet.normal, options.offsetDistance + scalar * 0.12);
-    positions.push(point.x, point.y, point.z);
-    const color = diagnosticColor(nearCaustic, 'Focal Distance');
-    colors.push(color.r, color.g, color.b);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  return geometry;
-}
-
 function traceOneRibbon(options: {
   value: SurfaceValue;
   field: RibbonField;
@@ -329,31 +239,4 @@ function selectRibbonDirection(jet: ReturnType<typeof evaluateSurfaceJet>, field
   if (field === 'Asymptotic +') return jet.asymptoticDirections[0].clone();
   if (field === 'Asymptotic -') return jet.asymptoticDirections[1].clone();
   return jet.principalDirections[0].clone();
-}
-
-function addSegment(
-  positions: number[],
-  colors: number[],
-  center: THREE.Vector3,
-  direction: THREE.Vector3,
-  length: number,
-  color: THREE.Color,
-) {
-  const a = center.clone().addScaledVector(direction, -length);
-  const b = center.clone().addScaledVector(direction, length);
-  positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
-  colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
-}
-
-function diagnosticColor(value: number, mode: GeometryOverlay) {
-  if (mode === 'Focal Distance') {
-    const t = THREE.MathUtils.clamp(value, 0, 1);
-    return new THREE.Color().setHSL(0.62 - t * 0.52, 0.95, 0.48 + t * 0.28);
-  }
-  if (mode === 'Minimality Error') {
-    const t = THREE.MathUtils.clamp(value * 9, 0, 1);
-    return new THREE.Color().setHSL(0.55 - t * 0.55, 0.95, 0.45 + t * 0.25);
-  }
-  const t = THREE.MathUtils.clamp(value * 1.7, 0, 1);
-  return new THREE.Color().setHSL(0.7 - t * 0.75, 0.96, 0.52);
 }

@@ -5,6 +5,26 @@ import type { SurfacePreset } from '../math/scalarFields';
 
 export type ComplementSide = 'positive labyrinth' | 'negative labyrinth';
 
+export type DeveloperRaymarchSettings = {
+  enabled: boolean;
+  geometryOverlay: number;
+  overlayStrength: number;
+  finiteDifferenceEpsilon: number;
+  bonnetStripMode: number;
+  bonnetParameter: number;
+  stripPhase: number;
+  stripWidth: number;
+  baseSurfaceFade: number;
+  parallelFocalMode: number;
+  offsetDistance: number;
+  causticStrength: number;
+  pointinessClamp: number;
+  screwPhase: number;
+  screwStrength: number;
+  screwCoreRadius: number;
+  minimalityDiagnostic: boolean;
+};
+
 type RaymarchShaderSettings = {
   preset: SurfacePreset;
   morphTarget: SurfacePreset;
@@ -29,6 +49,34 @@ const morphPathIndex: Record<MorphPath, number> = {
   'No morph': 0,
   'A to B pulse': 1,
   'Cycle all families': 2,
+};
+
+export const geometryOverlayIndex: Record<string, number> = {
+  Off: 0,
+  'Curvature Color': 1,
+  'Principal Directions': 2,
+  'Asymptotic Directions': 3,
+  'Minimality Error': 4,
+  'Focal Distance': 5,
+};
+
+export const bonnetStripModeIndex: Record<string, number> = {
+  Off: 0,
+  'Approx P-G-D Blend': 1,
+  'Strip Overlay': 2,
+};
+
+export const parallelFocalModeIndex: Record<string, number> = {
+  Off: 0,
+  'Offset Surface': 1,
+  'Focal Highlight': 2,
+  'Near-Caustic Shell': 3,
+};
+
+export const screwPhaseIndex: Record<string, number> = {
+  Off: 0,
+  'Single Defect': 1,
+  'Paired Defects': 2,
 };
 
 const surfaceFieldSources: Record<SurfacePreset, { fn: string; source: string }> = {
@@ -216,6 +264,23 @@ const fragmentShader = /* glsl */ `
   uniform float uRimStrength;
   uniform int uComplementMode;
   uniform int uComplementSide;
+  uniform int uDeveloperMode;
+  uniform int uDevGeometryOverlay;
+  uniform float uDevOverlayStrength;
+  uniform float uDevFiniteDifferenceEpsilon;
+  uniform int uDevBonnetMode;
+  uniform float uDevBonnetParameter;
+  uniform float uDevStripPhase;
+  uniform float uDevStripWidth;
+  uniform float uDevBaseSurfaceFade;
+  uniform int uDevParallelMode;
+  uniform float uDevOffsetDistance;
+  uniform float uDevCausticStrength;
+  uniform float uDevPointinessClamp;
+  uniform int uDevScrewMode;
+  uniform float uDevScrewStrength;
+  uniform float uDevScrewCoreRadius;
+  uniform int uDevMinimalityDiagnostic;
 
   const int MAX_STEPS = 768;
   const int REFINE_STEPS = 7;
@@ -391,8 +456,44 @@ const fragmentShader = /* glsl */ `
     return p;
   }
 
-  float morphedField(vec3 p) {
-    vec3 q = animatedDomain(p) * uFrequency;
+  vec3 developerDomain(vec3 p) {
+    p = animatedDomain(p);
+    if (uDeveloperMode == 1 && uDevScrewMode != 0 && abs(uDevScrewStrength) > 0.0001) {
+      float core = max(0.08, uDevScrewCoreRadius);
+      float phase = 0.0;
+      int defectCount = uDevScrewMode == 2 ? 2 : 1;
+
+      for (int i = 0; i < 2; i++) {
+        if (i >= defectCount) break;
+        vec2 center = i == 0
+          ? (uDevScrewMode == 2 ? vec2(-core, 0.0) : vec2(0.0, 0.0))
+          : vec2(core, 0.0);
+        float defectSign = i == 0 ? 1.0 : -1.0;
+        vec2 delta = p.xy - center;
+        float r2 = dot(delta, delta);
+        float falloff = 1.0 - exp(-r2 / (core * core));
+        phase += defectSign * atan(delta.y, delta.x) * falloff;
+      }
+
+      float twistAmount = uDevScrewStrength * phase;
+      p.x += twistAmount;
+      p.z += 0.35 * uDevScrewStrength * sin(phase);
+      p.xy = rotate2d(0.25 * twistAmount) * p.xy;
+    }
+    return p;
+  }
+
+  float morphedBaseValue(vec3 q) {
+    if (uDeveloperMode == 1 && uDevBonnetMode == 1) {
+      float t = smootherstep(uDevBonnetParameter);
+      float pField = schwarzP(q);
+      float gField = gyroid(q);
+      float dField = diamond(q);
+      return t < 0.5
+        ? mix(pField, gField, smootherstep(t * 2.0))
+        : mix(gField, dField, smootherstep((t - 0.5) * 2.0));
+    }
+
     float value = 0.0;
     if (uMorphPath == 2) {
       float scaled = fract(uMorphAmount) * SURFACE_COUNT;
@@ -409,7 +510,47 @@ const fragmentShader = /* glsl */ `
     } else {
       value = fieldByIndex(uPreset, q);
     }
-    return value - uIsoLevel;
+    return value;
+  }
+
+  float basicMorphedField(vec3 p) {
+    vec3 q = developerDomain(p) * uFrequency;
+    return morphedBaseValue(q) - uIsoLevel;
+  }
+
+  vec3 estimateBasicGradient(vec3 p) {
+    float eps = max(0.0035, 0.012 / max(0.8, uFrequency));
+    vec2 e = vec2(eps, 0.0);
+    return vec3(
+      basicMorphedField(p + e.xyy) - basicMorphedField(p - e.xyy),
+      basicMorphedField(p + e.yxy) - basicMorphedField(p - e.yxy),
+      basicMorphedField(p + e.yyx) - basicMorphedField(p - e.yyx)
+    ) / (2.0 * eps);
+  }
+
+  float curvaturePointinessProxy(vec3 p) {
+    float eps = max(0.006, uDevFiniteDifferenceEpsilon);
+    vec3 g = estimateBasicGradient(p);
+    float gm = max(length(g), 0.0001);
+    vec3 n = g / gm;
+    vec3 gp = estimateBasicGradient(p + n * eps);
+    vec3 gm2 = estimateBasicGradient(p - n * eps);
+    return clamp(length(gp - gm2) / max(0.0001, 2.0 * eps * gm), 0.0, 8.0);
+  }
+
+  float morphedField(vec3 p) {
+    float base = basicMorphedField(p);
+    if (uDeveloperMode == 1 && (uDevParallelMode == 1 || uDevParallelMode == 3)) {
+      float gradNorm = clamp(length(estimateBasicGradient(p)), 0.12, 6.0);
+      float offset = uDevOffsetDistance;
+      if (uDevParallelMode == 3) {
+        float focal = curvaturePointinessProxy(p);
+        float caustic = smoothstep(0.25, max(0.3, uDevPointinessClamp * 5.0), focal);
+        offset += sign(uDevOffsetDistance + 0.0001) * uDevCausticStrength * caustic * 0.16;
+      }
+      return base - offset * gradNorm;
+    }
+    return base;
   }
 
   bool raySphere(vec3 origin, vec3 direction, float radius, out float nearT, out float farT) {
@@ -440,6 +581,125 @@ const fragmentShader = /* glsl */ `
 
   vec3 estimateNormal(vec3 p) {
     return normalize(estimateGradient(p));
+  }
+
+  void curvatureDiagnostics(vec3 p, out float meanError, out float gaussian, out float curvatureMagnitude, out float focalDistance) {
+    float eps = clamp(uDevFiniteDifferenceEpsilon, 0.001, 0.04);
+    float f = morphedField(p);
+    float xp = morphedField(p + vec3(eps, 0.0, 0.0));
+    float xm = morphedField(p - vec3(eps, 0.0, 0.0));
+    float yp = morphedField(p + vec3(0.0, eps, 0.0));
+    float ym = morphedField(p - vec3(0.0, eps, 0.0));
+    float zp = morphedField(p + vec3(0.0, 0.0, eps));
+    float zm = morphedField(p - vec3(0.0, 0.0, eps));
+
+    vec3 g = vec3(xp - xm, yp - ym, zp - zm) / (2.0 * eps);
+    float g2 = max(dot(g, g), 0.000001);
+    float gLen = sqrt(g2);
+    float fxx = (xp - 2.0 * f + xm) / (eps * eps);
+    float fyy = (yp - 2.0 * f + ym) / (eps * eps);
+    float fzz = (zp - 2.0 * f + zm) / (eps * eps);
+    float fxy = (
+      morphedField(p + vec3(eps, eps, 0.0)) -
+      morphedField(p + vec3(eps, -eps, 0.0)) -
+      morphedField(p + vec3(-eps, eps, 0.0)) +
+      morphedField(p + vec3(-eps, -eps, 0.0))
+    ) / (4.0 * eps * eps);
+    float fxz = (
+      morphedField(p + vec3(eps, 0.0, eps)) -
+      morphedField(p + vec3(eps, 0.0, -eps)) -
+      morphedField(p + vec3(-eps, 0.0, eps)) +
+      morphedField(p + vec3(-eps, 0.0, -eps))
+    ) / (4.0 * eps * eps);
+    float fyz = (
+      morphedField(p + vec3(0.0, eps, eps)) -
+      morphedField(p + vec3(0.0, eps, -eps)) -
+      morphedField(p + vec3(0.0, -eps, eps)) +
+      morphedField(p + vec3(0.0, -eps, -eps))
+    ) / (4.0 * eps * eps);
+
+    mat3 h = mat3(
+      fxx, fxy, fxz,
+      fxy, fyy, fyz,
+      fxz, fyz, fzz
+    );
+    vec3 hg = h * g;
+    float traceH = fxx + fyy + fzz;
+    float mean = (g2 * traceH - dot(g, hg)) / max(0.000001, 2.0 * g2 * gLen);
+    float cxx = fyy * fzz - fyz * fyz;
+    float cxy = fxz * fyz - fxy * fzz;
+    float cxz = fxy * fyz - fxz * fyy;
+    float cyy = fxx * fzz - fxz * fxz;
+    float cyz = fxy * fxz - fxx * fyz;
+    float czz = fxx * fyy - fxy * fxy;
+    float cofactorQuadratic =
+      g.x * (cxx * g.x + cxy * g.y + cxz * g.z) +
+      g.y * (cxy * g.x + cyy * g.y + cyz * g.z) +
+      g.z * (cxz * g.x + cyz * g.y + czz * g.z);
+    gaussian = cofactorQuadratic / max(0.000001, g2 * g2);
+    meanError = abs(mean);
+    curvatureMagnitude = clamp(sqrt(max(0.0, mean * mean - gaussian)), 0.0, 8.0);
+    focalDistance = 1.0 / max(0.035, curvatureMagnitude);
+  }
+
+  vec3 developerHeat(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return mix(vec3(0.05, 0.25, 1.0), mix(vec3(0.0, 1.0, 0.72), vec3(1.0, 0.15, 0.03), smoothstep(0.35, 1.0, t)), smoothstep(0.0, 0.85, t));
+  }
+
+  vec3 applyDeveloperSurfaceColor(vec3 color, vec3 position, vec3 normal) {
+    if (uDeveloperMode != 1) {
+      return color;
+    }
+
+    float meanError;
+    float gaussian;
+    float curvatureMagnitude;
+    float focalDistance;
+    bool needsCurvature =
+      uDevGeometryOverlay != 0 ||
+      uDevParallelMode == 2 ||
+      uDevParallelMode == 3 ||
+      uDevMinimalityDiagnostic == 1;
+    if (needsCurvature) {
+      curvatureDiagnostics(position, meanError, gaussian, curvatureMagnitude, focalDistance);
+    }
+
+    vec3 devColor = color;
+    if (uDevGeometryOverlay == 1) {
+      devColor = developerHeat(curvatureMagnitude * 0.65);
+    } else if (uDevGeometryOverlay == 2) {
+      float bands = 0.5 + 0.5 * sin((position.x * normal.y - position.y * normal.x + position.z * 0.23) * 42.0);
+      devColor = mix(vec3(0.0, 0.9, 1.0), vec3(1.0, 0.1, 0.85), smoothstep(0.38, 0.62, bands));
+    } else if (uDevGeometryOverlay == 3) {
+      float bands = 0.5 + 0.5 * sin((position.x + position.y - position.z + dot(normal, vec3(0.7, -0.2, 0.4))) * 34.0);
+      devColor = mix(vec3(0.1, 1.0, 0.58), vec3(1.0, 0.75, 0.08), smoothstep(0.42, 0.6, bands));
+    } else if (uDevGeometryOverlay == 4 || (uDevMinimalityDiagnostic == 1 && uDevScrewMode != 0)) {
+      devColor = developerHeat(meanError * 10.0);
+    } else if (uDevGeometryOverlay == 5) {
+      devColor = developerHeat(1.0 - smoothstep(0.2, 2.8, focalDistance));
+    }
+
+    if (uDevBonnetMode != 0) {
+      float phase =
+        position.x * 2.2 +
+        position.y * 1.3 -
+        position.z * 1.7 +
+        uDevStripPhase * 6.2831853 +
+        uDevBonnetParameter * 3.1415926;
+      float stripe = smoothstep(0.5 - uDevStripWidth, 0.5, 0.5 + 0.5 * sin(phase * 6.0));
+      vec3 stripColor = mix(vec3(0.04, 0.95, 1.0), vec3(1.0, 0.86, 0.26), stripe);
+      color *= mix(0.28, 1.0, clamp(uDevBaseSurfaceFade, 0.0, 1.0));
+      devColor = mix(color, stripColor, 0.62 + 0.24 * stripe);
+    }
+
+    if (uDevParallelMode == 2 || uDevParallelMode == 3) {
+      float nearFocal = smoothstep(0.0, max(0.08, uDevPointinessClamp), curvatureMagnitude);
+      vec3 caustic = mix(vec3(0.08, 0.85, 1.0), vec3(1.0, 0.95, 0.38), nearFocal);
+      devColor = mix(devColor, caustic, uDevCausticStrength * (0.35 + nearFocal * 0.4));
+    }
+
+    return mix(color, devColor, clamp(uDevOverlayStrength, 0.0, 1.0));
   }
 
   bool findSurface(vec3 origin, vec3 direction, float nearT, float farT, out vec3 hitPosition, out float hitGradient) {
@@ -671,6 +931,7 @@ const fragmentShader = /* glsl */ `
     vec3 color = uComplementMode == 1
       ? shadeComplementSolid(hitPosition, normal, viewDir, hitKind)
       : shadeSurface(hitPosition, normal, viewDir, hitGradient);
+    color = applyDeveloperSurfaceColor(color, hitPosition, normal);
     gl_FragColor = vec4(color, 1.0);
   }
 `;
@@ -680,7 +941,7 @@ function buildFragmentShader(settings: RaymarchShaderSettings) {
     return fragmentShader;
   }
 
-  const requiredPresets = [settings.preset];
+  const requiredPresets = [settings.preset, 'Gyroid' as SurfacePreset, 'Schwarz P' as SurfacePreset, 'Diamond' as SurfacePreset];
   if (settings.morphPath === 'A to B pulse') {
     requiredPresets.push(settings.morphTarget);
   }
@@ -694,27 +955,122 @@ function buildFragmentShader(settings: RaymarchShaderSettings) {
   vec3 animatedDomain`;
   const presetField = surfaceFieldSources[settings.preset].fn;
   const targetField = surfaceFieldSources[settings.morphTarget].fn;
-  const morphedField =
+  const morphedBaseValue =
     settings.morphPath === 'A to B pulse'
       ? /* glsl */ `
+  float morphedBaseValue(vec3 q) {
+    if (uDeveloperMode == 1 && uDevBonnetMode == 1) {
+      float t = smootherstep(uDevBonnetParameter);
+      float pField = schwarzP(q);
+      float gField = gyroid(q);
+      float dField = diamond(q);
+      return t < 0.5
+        ? mix(pField, gField, smootherstep(t * 2.0))
+        : mix(gField, dField, smootherstep((t - 0.5) * 2.0));
+    }
+    return mix(${presetField}(q), ${targetField}(q), smootherstep(uMorphAmount));
+  }
+
+  float basicMorphedField(vec3 p) {
+    vec3 q = developerDomain(p) * uFrequency;
+    return morphedBaseValue(q) - uIsoLevel;
+  }
+
+  vec3 estimateBasicGradient(vec3 p) {
+    float eps = max(0.0035, 0.012 / max(0.8, uFrequency));
+    vec2 e = vec2(eps, 0.0);
+    return vec3(
+      basicMorphedField(p + e.xyy) - basicMorphedField(p - e.xyy),
+      basicMorphedField(p + e.yxy) - basicMorphedField(p - e.yxy),
+      basicMorphedField(p + e.yyx) - basicMorphedField(p - e.yyx)
+    ) / (2.0 * eps);
+  }
+
+  float curvaturePointinessProxy(vec3 p) {
+    float eps = max(0.006, uDevFiniteDifferenceEpsilon);
+    vec3 g = estimateBasicGradient(p);
+    float gm = max(length(g), 0.0001);
+    vec3 n = g / gm;
+    vec3 gp = estimateBasicGradient(p + n * eps);
+    vec3 gm2 = estimateBasicGradient(p - n * eps);
+    return clamp(length(gp - gm2) / max(0.0001, 2.0 * eps * gm), 0.0, 8.0);
+  }
+
   float morphedField(vec3 p) {
-    vec3 q = animatedDomain(p) * uFrequency;
-    float value = mix(${presetField}(q), ${targetField}(q), smootherstep(uMorphAmount));
-    return value - uIsoLevel;
+    float base = basicMorphedField(p);
+    if (uDeveloperMode == 1 && (uDevParallelMode == 1 || uDevParallelMode == 3)) {
+      float gradNorm = clamp(length(estimateBasicGradient(p)), 0.12, 6.0);
+      float offset = uDevOffsetDistance;
+      if (uDevParallelMode == 3) {
+        float focal = curvaturePointinessProxy(p);
+        float caustic = smoothstep(0.25, max(0.3, uDevPointinessClamp * 5.0), focal);
+        offset += sign(uDevOffsetDistance + 0.0001) * uDevCausticStrength * caustic * 0.16;
+      }
+      return base - offset * gradNorm;
+    }
+    return base;
   }
 
   bool raySphere`
       : /* glsl */ `
+  float morphedBaseValue(vec3 q) {
+    if (uDeveloperMode == 1 && uDevBonnetMode == 1) {
+      float t = smootherstep(uDevBonnetParameter);
+      float pField = schwarzP(q);
+      float gField = gyroid(q);
+      float dField = diamond(q);
+      return t < 0.5
+        ? mix(pField, gField, smootherstep(t * 2.0))
+        : mix(gField, dField, smootherstep((t - 0.5) * 2.0));
+    }
+    return ${presetField}(q);
+  }
+
+  float basicMorphedField(vec3 p) {
+    vec3 q = developerDomain(p) * uFrequency;
+    return morphedBaseValue(q) - uIsoLevel;
+  }
+
+  vec3 estimateBasicGradient(vec3 p) {
+    float eps = max(0.0035, 0.012 / max(0.8, uFrequency));
+    vec2 e = vec2(eps, 0.0);
+    return vec3(
+      basicMorphedField(p + e.xyy) - basicMorphedField(p - e.xyy),
+      basicMorphedField(p + e.yxy) - basicMorphedField(p - e.yxy),
+      basicMorphedField(p + e.yyx) - basicMorphedField(p - e.yyx)
+    ) / (2.0 * eps);
+  }
+
+  float curvaturePointinessProxy(vec3 p) {
+    float eps = max(0.006, uDevFiniteDifferenceEpsilon);
+    vec3 g = estimateBasicGradient(p);
+    float gm = max(length(g), 0.0001);
+    vec3 n = g / gm;
+    vec3 gp = estimateBasicGradient(p + n * eps);
+    vec3 gm2 = estimateBasicGradient(p - n * eps);
+    return clamp(length(gp - gm2) / max(0.0001, 2.0 * eps * gm), 0.0, 8.0);
+  }
+
   float morphedField(vec3 p) {
-    vec3 q = animatedDomain(p) * uFrequency;
-    return ${presetField}(q) - uIsoLevel;
+    float base = basicMorphedField(p);
+    if (uDeveloperMode == 1 && (uDevParallelMode == 1 || uDevParallelMode == 3)) {
+      float gradNorm = clamp(length(estimateBasicGradient(p)), 0.12, 6.0);
+      float offset = uDevOffsetDistance;
+      if (uDevParallelMode == 3) {
+        float focal = curvaturePointinessProxy(p);
+        float caustic = smoothstep(0.25, max(0.3, uDevPointinessClamp * 5.0), focal);
+        offset += sign(uDevOffsetDistance + 0.0001) * uDevCausticStrength * caustic * 0.16;
+      }
+      return base - offset * gradNorm;
+    }
+    return base;
   }
 
   bool raySphere`;
 
   return fragmentShader
     .replace(/ {2}float gyroid\(vec3 p\) \{[\s\S]*? {2}vec3 animatedDomain/, fieldSection)
-    .replace(/ {2}float morphedField\(vec3 p\) \{[\s\S]*? {2}bool raySphere/, morphedField);
+    .replace(/ {2}float morphedBaseValue\(vec3 q\) \{[\s\S]*? {2}bool raySphere/, morphedBaseValue);
 }
 
 export function createRaymarchMaterial(settings: RaymarchShaderSettings) {
@@ -746,6 +1102,23 @@ export function createRaymarchMaterial(settings: RaymarchShaderSettings) {
       uRimStrength: { value: 1.2 },
       uComplementMode: { value: 0 },
       uComplementSide: { value: 1 },
+      uDeveloperMode: { value: 0 },
+      uDevGeometryOverlay: { value: 0 },
+      uDevOverlayStrength: { value: 0.5 },
+      uDevFiniteDifferenceEpsilon: { value: 0.006 },
+      uDevBonnetMode: { value: 0 },
+      uDevBonnetParameter: { value: 0.5 },
+      uDevStripPhase: { value: 0 },
+      uDevStripWidth: { value: 0.055 },
+      uDevBaseSurfaceFade: { value: 1 },
+      uDevParallelMode: { value: 0 },
+      uDevOffsetDistance: { value: 0.08 },
+      uDevCausticStrength: { value: 0.5 },
+      uDevPointinessClamp: { value: 0.28 },
+      uDevScrewMode: { value: 0 },
+      uDevScrewStrength: { value: 0 },
+      uDevScrewCoreRadius: { value: 0.7 },
+      uDevMinimalityDiagnostic: { value: 1 },
     },
   });
 }
@@ -773,6 +1146,7 @@ export function updateRaymarchMaterial(
     twist: number;
     complementSolid: boolean;
     complementSide: ComplementSide;
+    developer: DeveloperRaymarchSettings;
   },
 ) {
   const { uniforms } = material;
@@ -795,6 +1169,23 @@ export function updateRaymarchMaterial(
   uniforms.uSurfaceThickness.value = settings.shellThickness;
   uniforms.uComplementMode.value = options.complementSolid ? 1 : 0;
   uniforms.uComplementSide.value = options.complementSide === 'negative labyrinth' ? -1 : 1;
+  uniforms.uDeveloperMode.value = options.developer.enabled ? 1 : 0;
+  uniforms.uDevGeometryOverlay.value = options.developer.geometryOverlay;
+  uniforms.uDevOverlayStrength.value = options.developer.overlayStrength;
+  uniforms.uDevFiniteDifferenceEpsilon.value = options.developer.finiteDifferenceEpsilon;
+  uniforms.uDevBonnetMode.value = options.developer.bonnetStripMode;
+  uniforms.uDevBonnetParameter.value = options.developer.bonnetParameter;
+  uniforms.uDevStripPhase.value = options.developer.stripPhase;
+  uniforms.uDevStripWidth.value = options.developer.stripWidth;
+  uniforms.uDevBaseSurfaceFade.value = options.developer.baseSurfaceFade;
+  uniforms.uDevParallelMode.value = options.developer.parallelFocalMode;
+  uniforms.uDevOffsetDistance.value = options.developer.offsetDistance;
+  uniforms.uDevCausticStrength.value = options.developer.causticStrength;
+  uniforms.uDevPointinessClamp.value = options.developer.pointinessClamp;
+  uniforms.uDevScrewMode.value = options.developer.screwPhase;
+  uniforms.uDevScrewStrength.value = options.developer.screwStrength;
+  uniforms.uDevScrewCoreRadius.value = options.developer.screwCoreRadius;
+  uniforms.uDevMinimalityDiagnostic.value = options.developer.minimalityDiagnostic ? 1 : 0;
   uniforms.uRimStrength.value =
     options.colorMode === 'metallic white/gold rim emphasis'
       ? 2.2

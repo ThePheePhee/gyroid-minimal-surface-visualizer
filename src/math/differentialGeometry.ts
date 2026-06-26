@@ -143,14 +143,6 @@ export function projectToSurface(
   return projected;
 }
 
-export function jetScalar(jet: SurfaceJet, mode: 'gaussian' | 'minimality' | 'curvatureMagnitude' | 'focalDistance') {
-  const magnitude = Math.max(Math.abs(jet.principalCurvatures[0]), Math.abs(jet.principalCurvatures[1]));
-  if (mode === 'gaussian') return jet.gaussianCurvature;
-  if (mode === 'minimality') return Math.abs(jet.meanCurvature);
-  if (mode === 'focalDistance') return 1 / Math.max(0.03, magnitude);
-  return magnitude;
-}
-
 function offset(p: THREE.Vector3, x: number, y: number, z: number) {
   return new THREE.Vector3(p.x + x, p.y + y, p.z + z);
 }
