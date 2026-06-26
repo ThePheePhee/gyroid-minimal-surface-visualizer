@@ -29,7 +29,15 @@ export function GpuSurface({
   twist,
   complementSolid,
 }: GpuSurfaceProps) {
-  const material = useMemo(() => createRaymarchMaterial(), []);
+  const shaderSettings = useMemo(
+    () => ({
+      preset: settings.preset,
+      morphTarget: settings.morphTarget,
+      morphPath: settings.morphPath,
+    }),
+    [settings.morphPath, settings.morphTarget, settings.preset],
+  );
+  const material = useMemo(() => createRaymarchMaterial(shaderSettings), [shaderSettings]);
   const { camera } = useThree();
 
   useEffect(() => {

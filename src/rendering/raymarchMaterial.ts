@@ -3,6 +3,12 @@ import { colorModeIndex, type ColorMode } from './surfaceMaterial';
 import type { MorphPath } from './geometryCache';
 import type { SurfacePreset } from '../math/scalarFields';
 
+type RaymarchShaderSettings = {
+  preset: SurfacePreset;
+  morphTarget: SurfacePreset;
+  morphPath: MorphPath;
+};
+
 const surfaceIndex: Record<SurfacePreset, number> = {
   Gyroid: 0,
   'Schwarz P': 1,
@@ -21,6 +27,155 @@ const morphPathIndex: Record<MorphPath, number> = {
   'No morph': 0,
   'A to B pulse': 1,
   'Cycle all families': 2,
+};
+
+const surfaceFieldSources: Record<SurfacePreset, { fn: string; source: string }> = {
+  Gyroid: {
+    fn: 'gyroid',
+    source: /* glsl */ `
+  float gyroid(vec3 p) {
+    return (
+      sin(p.x) * cos(p.y) +
+      sin(p.y) * cos(p.z) +
+      sin(p.z) * cos(p.x)
+    ) / 1.5;
+  }
+`,
+  },
+  'Schwarz P': {
+    fn: 'schwarzP',
+    source: /* glsl */ `
+  float schwarzP(vec3 p) {
+    return (cos(p.x) + cos(p.y) + cos(p.z)) / 3.0;
+  }
+`,
+  },
+  Diamond: {
+    fn: 'diamond',
+    source: /* glsl */ `
+  float diamond(vec3 p) {
+    return (
+      sin(p.x) * sin(p.y) * sin(p.z) +
+      sin(p.x) * cos(p.y) * cos(p.z) +
+      cos(p.x) * sin(p.y) * cos(p.z) +
+      cos(p.x) * cos(p.y) * sin(p.z)
+    ) / 2.0;
+  }
+`,
+  },
+  Neovius: {
+    fn: 'neovius',
+    source: /* glsl */ `
+  float neovius(vec3 p) {
+    return (
+      3.0 * (cos(p.x) + cos(p.y) + cos(p.z)) +
+      4.0 * cos(p.x) * cos(p.y) * cos(p.z)
+    ) / 13.0;
+  }
+`,
+  },
+  Lidinoid: {
+    fn: 'lidinoid',
+    source: /* glsl */ `
+  float lidinoid(vec3 p) {
+    return (
+      0.5 * (
+        sin(2.0 * p.x) * cos(p.y) * sin(p.z) +
+        sin(2.0 * p.y) * cos(p.z) * sin(p.x) +
+        sin(2.0 * p.z) * cos(p.x) * sin(p.y)
+      ) -
+      0.5 * (
+        cos(2.0 * p.x) * cos(2.0 * p.y) +
+        cos(2.0 * p.y) * cos(2.0 * p.z) +
+        cos(2.0 * p.z) * cos(2.0 * p.x)
+      ) +
+      0.15
+    ) / 2.2;
+  }
+`,
+  },
+  'Schoen I-WP': {
+    fn: 'schoenIwp',
+    source: /* glsl */ `
+  float schoenIwp(vec3 p) {
+    return (
+      2.0 * (
+        cos(p.x) * cos(p.y) +
+        cos(p.y) * cos(p.z) +
+        cos(p.z) * cos(p.x)
+      ) -
+      (cos(2.0 * p.x) + cos(2.0 * p.y) + cos(2.0 * p.z))
+    ) / 6.0;
+  }
+`,
+  },
+  'Schoen F-RD': {
+    fn: 'schoenFrd',
+    source: /* glsl */ `
+  float schoenFrd(vec3 p) {
+    return (
+      4.0 * cos(p.x) * cos(p.y) * cos(p.z) -
+      (
+        cos(2.0 * p.x) * cos(2.0 * p.y) +
+        cos(2.0 * p.y) * cos(2.0 * p.z) +
+        cos(2.0 * p.z) * cos(2.0 * p.x)
+      )
+    ) / 7.0;
+  }
+`,
+  },
+  'Schwarz CLP': {
+    fn: 'schwarzClp',
+    source: /* glsl */ `
+  float schwarzClp(vec3 p) {
+    return (
+      cos(p.x) + cos(p.y) + cos(p.z) +
+      cos(p.x) * cos(p.y) * cos(p.z)
+    ) / 4.0;
+  }
+`,
+  },
+  'Fischer-Koch S': {
+    fn: 'fischerKochS',
+    source: /* glsl */ `
+  float fischerKochS(vec3 p) {
+    return (
+      cos(2.0 * p.x) * sin(p.y) * cos(p.z) +
+      cos(p.x) * cos(2.0 * p.y) * sin(p.z) +
+      sin(p.x) * cos(p.y) * cos(2.0 * p.z)
+    ) / 3.0;
+  }
+`,
+  },
+  'Split P': {
+    fn: 'splitP',
+    source: /* glsl */ `
+  float splitP(vec3 p) {
+    return (
+      1.1 * (
+        sin(2.0 * p.x) * sin(p.z) * cos(p.y) +
+        sin(2.0 * p.y) * sin(p.x) * cos(p.z) +
+        sin(2.0 * p.z) * sin(p.y) * cos(p.x)
+      ) -
+      0.2 * (
+        cos(2.0 * p.x) * cos(2.0 * p.y) +
+        cos(2.0 * p.y) * cos(2.0 * p.z) +
+        cos(2.0 * p.z) * cos(2.0 * p.x)
+      ) -
+      0.4 * (cos(2.0 * p.x) + cos(2.0 * p.y) + cos(2.0 * p.z))
+    ) / 2.7;
+  }
+`,
+  },
+  'Double Gyroid': {
+    fn: 'doubleGyroid',
+    source: /* glsl */ `
+  float doubleGyroid(vec3 p) {
+    float g = gyroid(p);
+    return g * g - 0.18;
+  }
+`,
+  },
 };
 
 const vertexShader = /* glsl */ `
@@ -453,10 +608,52 @@ const fragmentShader = /* glsl */ `
   }
 `;
 
-export function createRaymarchMaterial() {
+function buildFragmentShader(settings: RaymarchShaderSettings) {
+  if (settings.morphPath === 'Cycle all families') {
+    return fragmentShader;
+  }
+
+  const requiredPresets = [settings.preset];
+  if (settings.morphPath === 'A to B pulse') {
+    requiredPresets.push(settings.morphTarget);
+  }
+  if (requiredPresets.includes('Double Gyroid')) {
+    requiredPresets.unshift('Gyroid');
+  }
+
+  const uniquePresets = Array.from(new Set(requiredPresets));
+  const fieldSection = `${uniquePresets.map((preset) => surfaceFieldSources[preset].source).join('\n')}
+
+  vec3 animatedDomain`;
+  const presetField = surfaceFieldSources[settings.preset].fn;
+  const targetField = surfaceFieldSources[settings.morphTarget].fn;
+  const morphedField =
+    settings.morphPath === 'A to B pulse'
+      ? /* glsl */ `
+  float morphedField(vec3 p) {
+    vec3 q = animatedDomain(p) * uFrequency;
+    float value = mix(${presetField}(q), ${targetField}(q), smootherstep(uMorphAmount));
+    return value - uIsoLevel;
+  }
+
+  bool raySphere`
+      : /* glsl */ `
+  float morphedField(vec3 p) {
+    vec3 q = animatedDomain(p) * uFrequency;
+    return ${presetField}(q) - uIsoLevel;
+  }
+
+  bool raySphere`;
+
+  return fragmentShader
+    .replace(/ {2}float gyroid\(vec3 p\) \{[\s\S]*? {2}vec3 animatedDomain/, fieldSection)
+    .replace(/ {2}float morphedField\(vec3 p\) \{[\s\S]*? {2}bool raySphere/, morphedField);
+}
+
+export function createRaymarchMaterial(settings: RaymarchShaderSettings) {
   return new THREE.ShaderMaterial({
     vertexShader,
-    fragmentShader,
+    fragmentShader: buildFragmentShader(settings),
     side: THREE.FrontSide,
     transparent: true,
     depthWrite: true,

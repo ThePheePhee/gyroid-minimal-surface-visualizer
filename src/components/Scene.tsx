@@ -65,10 +65,13 @@ const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
   get('Visualization Mode') === 'Knot Mode' && get('Knot Relationship Type') === type;
 
 export function Scene() {
+  const isOpera = typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent);
+  const maxDevicePixelRatio = isOpera ? 1 : 1.25;
+  const defaultRaySteps = isOpera ? 128 : 192;
   const controls = useControls({
     'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions },
     'Render mode': { value: 'GPU continuous raymarch', options: renderModeOptions, render: whenSurface },
-    'GPU ray steps': { value: 288, min: 128, max: 640, step: 16, render: whenSurface },
+    'GPU ray steps': { value: defaultRaySteps, min: 64, max: 384, step: 16, render: whenSurface },
     'Surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions, render: whenSurface },
     'Morph target': { value: 'Diamond' as SurfacePreset, options: presetOptions, render: whenSurface },
     'Morph path': { value: 'No morph' as MorphPath, options: morphPathOptions, render: whenSurface },
@@ -248,9 +251,11 @@ export function Scene() {
     <div className="app-shell" data-black={controls['Black background']}>
       <Leva collapsed={false} oneLineLabels />
       <Canvas
+        dpr={[1, maxDevicePixelRatio]}
         gl={{
-          antialias: true,
+          antialias: !isOpera,
           outputColorSpace: THREE.SRGBColorSpace,
+          powerPreference: 'high-performance',
         }}
       >
         <color
