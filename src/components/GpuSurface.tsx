@@ -39,9 +39,9 @@ export function GpuSurface({
       preset: settings.preset,
       morphTarget: settings.morphTarget,
       morphPath: settings.morphPath,
-      developerEnabled: developer.enabled,
+      developerShaderMode: developer.shaderMode,
     }),
-    [developer.enabled, settings.morphPath, settings.morphTarget, settings.preset],
+    [developer.shaderMode, settings.morphPath, settings.morphTarget, settings.preset],
   );
   const material = useMemo(() => createRaymarchMaterial(shaderSettings), [shaderSettings]);
   const { camera } = useThree();

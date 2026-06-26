@@ -220,10 +220,10 @@ export function Scene() {
     : 'Developer Lab ->';
   const developerToggleLabel = developerActive
     ? isOpera
-      ? 'Disable Opera-safe developer overlays'
+      ? 'Disable Opera-safe developer geometry'
       : 'Disable live developer geometry'
     : isOpera
-      ? 'Enable Opera-safe developer overlays'
+      ? 'Enable Opera-safe developer geometry'
       : 'Enable live developer geometry';
   const [controls, setControls] = useControls(
     () => ({
@@ -236,7 +236,7 @@ export function Scene() {
             [developerToggleLabel]: button(() => setDeveloperActive((active) => !active)),
             ...(isOpera
               ? {
-                  'GPU shader lab disabled in Opera': button(() => undefined, { disabled: true }),
+                  'Full curvature diagnostics disabled in Opera': button(() => undefined, { disabled: true }),
                 }
               : {}),
           }),
@@ -354,7 +354,7 @@ export function Scene() {
   }, [controls, defaultRaySteps, isOpera, setControls]);
 
   const developerRuntimeEnabled = developerActive;
-  const developerGpuShaderEnabled = developerRuntimeEnabled && !isOpera;
+  const developerShaderMode = developerRuntimeEnabled ? (isOpera ? 'safe' : 'full') : 'off';
   const effectiveRaySteps = isOpera
     ? Math.min(controls['GPU ray steps'], defaultRaySteps)
     : controls['GPU ray steps'];
@@ -490,7 +490,8 @@ export function Scene() {
 
   const developerRaymarchSettings = useMemo<DeveloperRaymarchSettings>(
     () => ({
-      enabled: developerGpuShaderEnabled && controls['Visualization Mode'] === 'Surface Mode',
+      enabled: developerRuntimeEnabled && controls['Visualization Mode'] === 'Surface Mode',
+      shaderMode: developerShaderMode,
       geometryOverlay: geometryOverlayIndex[developerSettings.geometryOverlay],
       overlayStrength: developerSettings.overlayStrength,
       finiteDifferenceEpsilon: developerSettings.finiteDifferenceEpsilon,
@@ -508,7 +509,7 @@ export function Scene() {
       screwCoreRadius: developerSettings.screwCoreRadius,
       minimalityDiagnostic: developerSettings.minimalityDiagnostic,
     }),
-    [controls, developerGpuShaderEnabled, developerSettings],
+    [controls, developerRuntimeEnabled, developerSettings, developerShaderMode],
   );
 
   return (
