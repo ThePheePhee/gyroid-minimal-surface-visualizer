@@ -1,6 +1,6 @@
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
-import { folder, Leva, useControls } from 'leva';
+import { button, folder, Leva, useControls } from 'leva';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { surfacePresets, type SurfacePreset } from '../math/scalarFields';
@@ -108,44 +108,142 @@ const filmMaterialOptions: Record<FilmMaterial, FilmMaterial> = {
   'pearl/porcelain': 'pearl/porcelain',
   'subtle rainbow interference': 'subtle rainbow interference',
 };
+
+const developerLabControls = folder(
+  {
+    'Differential Diagnostics': folder(
+      {
+        'Geometry Overlay': {
+          value: 'Off' as DeveloperOverlaySettings['geometryOverlay'],
+          options: geometryOverlayOptions,
+        },
+        'Finite Difference Epsilon': { value: 0.006, min: 0.001, max: 0.03, step: 0.001 },
+        'Overlay Strength': { value: 0.5, min: 0, max: 1, step: 0.01 },
+      },
+      { collapsed: false },
+    ),
+    'Surface-Derived Ribbons': folder(
+      {
+        'Ribbon Field': {
+          value: 'Off' as DeveloperOverlaySettings['ribbonField'],
+          options: ribbonFieldOptions,
+        },
+        'Seed Count': { value: 24, min: 4, max: 72, step: 1 },
+        'Trace Length': { value: 1.8, min: 0.3, max: 5, step: 0.05 },
+        'Developer Ribbon Width': { value: 0.035, min: 0.006, max: 0.16, step: 0.002 },
+        'Surface Lift': { value: 0.018, min: 0, max: 0.08, step: 0.002 },
+        'Animate Phase': false,
+      },
+      { collapsed: true },
+    ),
+    'Bonnet / Strip Lab': folder(
+      {
+        'Bonnet Strip Mode': {
+          value: 'Off' as DeveloperOverlaySettings['bonnetStripMode'],
+          options: bonnetStripOptions,
+        },
+        'Bonnet Parameter': { value: 0.5, min: 0, max: 1, step: 0.01 },
+        'Strip Phase': { value: 0, min: 0, max: 1, step: 0.01 },
+        'Strip Width': { value: 0.055, min: 0.01, max: 0.22, step: 0.005 },
+        'Base Surface Fade': { value: 1, min: 0, max: 1, step: 0.01 },
+      },
+      { collapsed: true },
+    ),
+    'Labyrinth Skeleton': folder(
+      {
+        'Labyrinth Skeleton Mode': {
+          value: 'Off' as DeveloperOverlaySettings['labyrinthSkeleton'],
+          options: labyrinthSkeletonOptions,
+        },
+        'Skeleton Resolution': {
+          value: 'Low' as DeveloperOverlaySettings['skeletonResolution'],
+          options: skeletonResolutionOptions,
+        },
+        'Developer Skeleton Thickness': { value: 0.035, min: 0.006, max: 0.12, step: 0.002 },
+        'Skeleton Visibility': { value: 0.6, min: 0, max: 1, step: 0.01 },
+      },
+      { collapsed: true },
+    ),
+    'Parallel / Focal Pointiness': folder(
+      {
+        'Parallel / Focal Mode': {
+          value: 'Off' as DeveloperOverlaySettings['parallelFocalMode'],
+          options: parallelFocalOptions,
+        },
+        'Offset Distance': { value: 0.08, min: -0.35, max: 0.35, step: 0.005 },
+        'Caustic Strength': { value: 0.5, min: 0, max: 1, step: 0.01 },
+        'Pointiness Clamp': { value: 0.28, min: 0.05, max: 1.2, step: 0.01 },
+      },
+      { collapsed: true },
+    ),
+    'Screw Phase': folder(
+      {
+        'Screw Phase Mode': {
+          value: 'Off' as DeveloperOverlaySettings['screwPhase'],
+          options: screwPhaseOptions,
+        },
+        'Screw Strength': { value: 0, min: -0.8, max: 0.8, step: 0.01 },
+        'Screw Core Radius': { value: 0.7, min: 0.12, max: 2, step: 0.02 },
+        'Minimality Diagnostic': true,
+      },
+      { collapsed: true },
+    ),
+  },
+  { collapsed: false },
+);
+
 type LevaGet = (path: string) => unknown;
-const whenSurface = (get: LevaGet) => get('Visualization Mode') === 'Surface Mode';
-const whenSurfaceGpu = (get: LevaGet) =>
-  get('Visualization Mode') === 'Surface Mode' && get('Render mode') === 'GPU continuous raymarch';
-const whenComplementSolid = (get: LevaGet) => whenSurfaceGpu(get) && get('Complement solid') === true;
-const whenDeveloper = (get: LevaGet) => get('Developer Mode') === true;
-const whenKnot = (get: LevaGet) => get('Visualization Mode') === 'Knot Mode';
-const whenKnotSurfaceRelation = (get: LevaGet) =>
-  get('Visualization Mode') === 'Knot Mode' && get('Knot Relationship Type') !== 'Knot-Bounded Minimal Film';
-const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
-  get('Visualization Mode') === 'Knot Mode' && get('Knot Relationship Type') === type;
+type ControlPage = 'main' | 'developer';
 
 export function Scene() {
   const isOpera = typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent);
   const maxDevicePixelRatio = isOpera ? 1 : 1.25;
   const defaultRaySteps = isOpera ? 96 : 192;
   const defaultRenderMode = 'GPU continuous raymarch';
+  const [controlPage, setControlPage] = useState<ControlPage>('main');
+  const [developerActive, setDeveloperActive] = useState(false);
+  const whenMain = () => controlPage === 'main';
+  const whenSurface = (get: LevaGet) => whenMain() && get('Visualization Mode') === 'Surface Mode';
+  const whenSurfaceGpu = (get: LevaGet) =>
+    whenSurface(get) && get('Render mode') === 'GPU continuous raymarch';
+  const whenComplementSolid = (get: LevaGet) =>
+    whenSurfaceGpu(get) && get('Complement solid') === true;
+  const whenKnot = (get: LevaGet) => whenMain() && get('Visualization Mode') === 'Knot Mode';
+  const whenKnotSurfaceRelation = (get: LevaGet) =>
+    whenKnot(get) && get('Knot Relationship Type') !== 'Knot-Bounded Minimal Film';
+  const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
+    whenKnot(get) && get('Knot Relationship Type') === type;
   const [controls, setControls] = useControls(
     () => ({
-    'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions },
-    'Developer Mode': false,
-    'Render mode': { value: defaultRenderMode, options: renderModeOptions, render: whenSurface },
-    'GPU ray steps': { value: defaultRaySteps, min: 64, max: 384, step: 16, render: whenSurface },
-    'Surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions, render: whenSurface },
-    'Morph target': { value: 'Diamond' as SurfacePreset, options: presetOptions, render: whenSurface },
-    'Morph path': { value: 'No morph' as MorphPath, options: morphPathOptions, render: whenSurface },
-    'Morph amount': { value: 0, min: 0, max: 1, step: 0.01, render: whenSurface },
-    'Animate morph': { value: false, render: whenSurface },
-    'Morph speed': { value: 0.08, min: 0.01, max: 0.5, step: 0.01, render: whenSurface },
-    'Morph remesh rate': { value: 10, min: 2, max: 20, step: 1, render: whenSurface },
-    'Iso-level / threshold': { value: 0, min: -0.7, max: 0.7, step: 0.01, render: whenSurface },
-    Resolution: { value: 64, min: 24, max: 96, step: 2, render: whenSurface },
-    Scale: { value: 2.25, min: 1.2, max: 4, step: 0.05, render: whenSurface },
-    'Number of periods / spatial frequency': { value: 3.1, min: 0.8, max: 6, step: 0.05, render: whenSurface },
-    'Spherical crop radius': { value: 2.08, min: 0.6, max: 3.8, step: 0.03, render: whenSurface },
-    'Crop softness': { value: 0.09, min: 0.01, max: 0.5, step: 0.01, render: whenSurface },
-    'Visual shell thickness': { value: 0.04, min: 0, max: 0.16, step: 0.005, render: whenSurface },
-    'Complement solid': { value: false, render: whenSurfaceGpu },
+      ...(controlPage === 'main'
+        ? {
+            [developerActive ? 'Developer Lab active ->' : 'Developer Lab ->']: button(() =>
+              setControlPage('developer'),
+            ),
+          }
+        : {
+            '<- Main controls': button(() => setControlPage('main')),
+            [developerActive ? 'Disable live developer geometry' : 'Enable live developer geometry']:
+              button(() => setDeveloperActive((active) => !active)),
+          }),
+      'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions, render: whenMain },
+      'Render mode': { value: defaultRenderMode, options: renderModeOptions, render: whenSurface },
+      'GPU ray steps': { value: defaultRaySteps, min: 64, max: 384, step: 16, render: whenSurface },
+      'Surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions, render: whenSurface },
+      'Morph target': { value: 'Diamond' as SurfacePreset, options: presetOptions, render: whenSurface },
+      'Morph path': { value: 'No morph' as MorphPath, options: morphPathOptions, render: whenSurface },
+      'Morph amount': { value: 0, min: 0, max: 1, step: 0.01, render: whenSurface },
+      'Animate morph': { value: false, render: whenSurface },
+      'Morph speed': { value: 0.08, min: 0.01, max: 0.5, step: 0.01, render: whenSurface },
+      'Morph remesh rate': { value: 10, min: 2, max: 20, step: 1, render: whenSurface },
+      'Iso-level / threshold': { value: 0, min: -0.7, max: 0.7, step: 0.01, render: whenSurface },
+      Resolution: { value: 64, min: 24, max: 96, step: 2, render: whenSurface },
+      Scale: { value: 2.25, min: 1.2, max: 4, step: 0.05, render: whenSurface },
+      'Number of periods / spatial frequency': { value: 3.1, min: 0.8, max: 6, step: 0.05, render: whenSurface },
+      'Spherical crop radius': { value: 2.08, min: 0.6, max: 3.8, step: 0.03, render: whenSurface },
+      'Crop softness': { value: 0.09, min: 0.01, max: 0.5, step: 0.01, render: whenSurface },
+      'Visual shell thickness': { value: 0.04, min: 0, max: 0.16, step: 0.005, render: whenSurface },
+      'Complement solid': { value: false, render: whenSurfaceGpu },
     'Complement side': {
       value: 'positive labyrinth' as ComplementSide,
       options: complementSideOptions,
@@ -154,8 +252,8 @@ export function Scene() {
     Wireframe: { value: false, render: whenSurface },
     'Smooth shading': { value: true, render: whenSurface },
     'Color mode': { value: 'rainbow curvature-like bands' as ColorMode, options: colorOptions, render: whenSurface },
-    'Black background': true,
-    'Auto-rotation speed': { value: 0.22, min: 0, max: 1.5, step: 0.01 },
+    'Black background': { value: true, render: whenMain },
+    'Auto-rotation speed': { value: 0.22, min: 0, max: 1.5, step: 0.01, render: whenMain },
     'Wobble amplitude': { value: 0.018, min: 0, max: 0.12, step: 0.002, render: whenSurface },
     'Wobble speed': { value: 1.15, min: 0.05, max: 4, step: 0.05, render: whenSurface },
     'Wobble spatial scale': { value: 4.2, min: 0.5, max: 12, step: 0.1, render: whenSurface },
@@ -215,90 +313,11 @@ export function Scene() {
     'Film material': { value: 'subtle rainbow interference' as FilmMaterial, options: filmMaterialOptions, render: whenKnotType('Knot-Bounded Minimal Film') },
     'Torus p': { value: 2, min: 1, max: 8, step: 1, render: whenKnotType('Knot-Bounded Minimal Film') },
     'Torus q': { value: 3, min: 1, max: 9, step: 1, render: whenKnotType('Knot-Bounded Minimal Film') },
-    'Differential Geometry / Ribbon Lab': folder(
-      {
-        'Differential Diagnostics': folder(
-          {
-            'Geometry Overlay': {
-              value: 'Off' as DeveloperOverlaySettings['geometryOverlay'],
-              options: geometryOverlayOptions,
-            },
-            'Finite Difference Epsilon': { value: 0.006, min: 0.001, max: 0.03, step: 0.001 },
-            'Overlay Strength': { value: 0.5, min: 0, max: 1, step: 0.01 },
-          },
-          { collapsed: false },
-        ),
-        'Surface-Derived Ribbons': folder(
-          {
-            'Ribbon Field': {
-              value: 'Off' as DeveloperOverlaySettings['ribbonField'],
-              options: ribbonFieldOptions,
-            },
-            'Seed Count': { value: 24, min: 4, max: 72, step: 1 },
-            'Trace Length': { value: 1.8, min: 0.3, max: 5, step: 0.05 },
-            'Developer Ribbon Width': { value: 0.035, min: 0.006, max: 0.16, step: 0.002 },
-            'Surface Lift': { value: 0.018, min: 0, max: 0.08, step: 0.002 },
-            'Animate Phase': false,
-          },
-          { collapsed: true },
-        ),
-        'Bonnet / Strip Lab': folder(
-          {
-            'Bonnet Strip Mode': {
-              value: 'Off' as DeveloperOverlaySettings['bonnetStripMode'],
-              options: bonnetStripOptions,
-            },
-            'Bonnet Parameter': { value: 0.5, min: 0, max: 1, step: 0.01 },
-            'Strip Phase': { value: 0, min: 0, max: 1, step: 0.01 },
-            'Strip Width': { value: 0.055, min: 0.01, max: 0.22, step: 0.005 },
-            'Base Surface Fade': { value: 1, min: 0, max: 1, step: 0.01 },
-          },
-          { collapsed: true },
-        ),
-        'Labyrinth Skeleton': folder(
-          {
-            'Labyrinth Skeleton Mode': {
-              value: 'Off' as DeveloperOverlaySettings['labyrinthSkeleton'],
-              options: labyrinthSkeletonOptions,
-            },
-            'Skeleton Resolution': {
-              value: 'Low' as DeveloperOverlaySettings['skeletonResolution'],
-              options: skeletonResolutionOptions,
-            },
-            'Developer Skeleton Thickness': { value: 0.035, min: 0.006, max: 0.12, step: 0.002 },
-            'Skeleton Visibility': { value: 0.6, min: 0, max: 1, step: 0.01 },
-          },
-          { collapsed: true },
-        ),
-        'Parallel / Focal Pointiness': folder(
-          {
-            'Parallel / Focal Mode': {
-              value: 'Off' as DeveloperOverlaySettings['parallelFocalMode'],
-              options: parallelFocalOptions,
-            },
-            'Offset Distance': { value: 0.08, min: -0.35, max: 0.35, step: 0.005 },
-            'Caustic Strength': { value: 0.5, min: 0, max: 1, step: 0.01 },
-            'Pointiness Clamp': { value: 0.28, min: 0.05, max: 1.2, step: 0.01 },
-          },
-          { collapsed: true },
-        ),
-        'Screw Phase': folder(
-          {
-            'Screw Phase Mode': {
-              value: 'Off' as DeveloperOverlaySettings['screwPhase'],
-              options: screwPhaseOptions,
-            },
-            'Screw Strength': { value: 0, min: -0.8, max: 0.8, step: 0.01 },
-            'Screw Core Radius': { value: 0.7, min: 0.12, max: 2, step: 0.02 },
-            'Minimality Diagnostic': true,
-          },
-          { collapsed: true },
-        ),
-      },
-      { collapsed: true, render: whenDeveloper },
-    ),
+    ...(controlPage === 'developer'
+      ? { 'Differential Geometry / Ribbon Lab': developerLabControls }
+      : {}),
     }),
-    [defaultRaySteps, defaultRenderMode],
+    [controlPage, defaultRaySteps, defaultRenderMode, developerActive],
   );
 
   const [autoMorph, setAutoMorph] = useState(0);
@@ -315,16 +334,12 @@ export function Scene() {
   }, [setControls]);
 
   useEffect(() => {
-    if (isOpera && controls['Developer Mode']) {
-      setControls({ 'Developer Mode': false });
-    }
-
     if (isOpera && controls['GPU ray steps'] > defaultRaySteps) {
       setControls({ 'GPU ray steps': defaultRaySteps });
     }
   }, [controls, defaultRaySteps, isOpera, setControls]);
 
-  const developerRuntimeEnabled = controls['Developer Mode'] && !isOpera;
+  const developerRuntimeEnabled = developerActive;
   const effectiveRaySteps = isOpera
     ? Math.min(controls['GPU ray steps'], defaultRaySteps)
     : controls['GPU ray steps'];
@@ -410,8 +425,8 @@ export function Scene() {
       morphPath: controls['Morph path'],
       morphAmount: effectiveMorphAmount,
       isoLevel: controls['Iso-level / threshold'],
-      resolution: controls.Resolution,
-      scale: controls.Scale,
+      resolution: controls['Resolution'],
+      scale: controls['Scale'],
       frequency: controls['Number of periods / spatial frequency'],
       cropRadius: controls['Spherical crop radius'],
       cropSoftness: controls['Crop softness'],
@@ -421,36 +436,40 @@ export function Scene() {
   );
 
   const developerSettings = useMemo<DeveloperOverlaySettings>(
-    () => ({
-      geometryOverlay: controls['Geometry Overlay'],
-      finiteDifferenceEpsilon: controls['Finite Difference Epsilon'],
-      overlayStrength: controls['Overlay Strength'],
-      ribbonField: controls['Ribbon Field'],
-      seedCount: controls['Seed Count'],
-      traceLength: controls['Trace Length'],
-      ribbonWidth: controls['Developer Ribbon Width'],
-      surfaceLift: controls['Surface Lift'],
-      animatePhase: controls['Animate Phase'],
-      bonnetStripMode: controls['Bonnet Strip Mode'],
-      bonnetParameter: controls['Bonnet Parameter'],
-      stripPhase: controls['Strip Phase'],
-      stripWidth: controls['Strip Width'],
-      baseSurfaceFade: controls['Base Surface Fade'],
-      labyrinthSkeleton: controls['Labyrinth Skeleton Mode'],
-      skeletonResolution: controls['Skeleton Resolution'],
-      skeletonThickness: controls['Developer Skeleton Thickness'],
-      skeletonVisibility: controls['Skeleton Visibility'],
-      parallelFocalMode: controls['Parallel / Focal Mode'],
-      offsetDistance: controls['Offset Distance'],
-      causticStrength: controls['Caustic Strength'],
-      pointinessClamp: controls['Pointiness Clamp'],
-      screwPhase: controls['Screw Phase Mode'],
-      screwStrength: controls['Screw Strength'],
-      screwCoreRadius: controls['Screw Core Radius'],
-      minimalityDiagnostic: controls['Minimality Diagnostic'],
-      complementSide: controls['Complement side'],
-      autoRotationSpeed: controls['Auto-rotation speed'],
-    }),
+    () => {
+      const read = <T,>(key: string, fallback: T): T => (controls[key] ?? fallback) as T;
+
+      return {
+        geometryOverlay: read('Geometry Overlay', 'Off' as DeveloperOverlaySettings['geometryOverlay']),
+        finiteDifferenceEpsilon: read('Finite Difference Epsilon', 0.006),
+        overlayStrength: read('Overlay Strength', 0.5),
+        ribbonField: read('Ribbon Field', 'Off' as DeveloperOverlaySettings['ribbonField']),
+        seedCount: read('Seed Count', 24),
+        traceLength: read('Trace Length', 1.8),
+        ribbonWidth: read('Developer Ribbon Width', 0.035),
+        surfaceLift: read('Surface Lift', 0.018),
+        animatePhase: read('Animate Phase', false),
+        bonnetStripMode: read('Bonnet Strip Mode', 'Off' as DeveloperOverlaySettings['bonnetStripMode']),
+        bonnetParameter: read('Bonnet Parameter', 0.5),
+        stripPhase: read('Strip Phase', 0),
+        stripWidth: read('Strip Width', 0.055),
+        baseSurfaceFade: read('Base Surface Fade', 1),
+        labyrinthSkeleton: read('Labyrinth Skeleton Mode', 'Off' as DeveloperOverlaySettings['labyrinthSkeleton']),
+        skeletonResolution: read('Skeleton Resolution', 'Low' as DeveloperOverlaySettings['skeletonResolution']),
+        skeletonThickness: read('Developer Skeleton Thickness', 0.035),
+        skeletonVisibility: read('Skeleton Visibility', 0.6),
+        parallelFocalMode: read('Parallel / Focal Mode', 'Off' as DeveloperOverlaySettings['parallelFocalMode']),
+        offsetDistance: read('Offset Distance', 0.08),
+        causticStrength: read('Caustic Strength', 0.5),
+        pointinessClamp: read('Pointiness Clamp', 0.28),
+        screwPhase: read('Screw Phase Mode', 'Off' as DeveloperOverlaySettings['screwPhase']),
+        screwStrength: read('Screw Strength', 0),
+        screwCoreRadius: read('Screw Core Radius', 0.7),
+        minimalityDiagnostic: read('Minimality Diagnostic', true),
+        complementSide: read('Complement side', 'positive labyrinth' as ComplementSide),
+        autoRotationSpeed: read('Auto-rotation speed', 0.22),
+      };
+    },
     [controls],
   );
 
@@ -562,7 +581,7 @@ export function Scene() {
               settings={settings}
               colorMode={controls['Color mode']}
               smoothShading={controls['Smooth shading']}
-              wireframe={controls.Wireframe}
+              wireframe={controls['Wireframe']}
               autoRotationSpeed={controls['Auto-rotation speed']}
               wobbleAmplitude={controls['Wobble amplitude']}
               wobbleSpeed={controls['Wobble speed']}
