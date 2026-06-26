@@ -70,6 +70,7 @@ export const bonnetStripModeIndex: Record<string, number> = {
   Off: 0,
   'Approx P-G-D Blend': 1,
   'Strip Overlay': 2,
+  'Surface Weave': 3,
 };
 
 export const parallelFocalModeIndex: Record<string, number> = {
@@ -717,16 +718,35 @@ const fragmentShader = /* glsl */ `
     }
 
     if (uDevBonnetMode != 0) {
-      float phase =
-        position.x * 2.2 +
-        position.y * 1.3 -
-        position.z * 1.7 +
-        uDevStripPhase * 6.2831853 +
-        uDevBonnetParameter * 3.1415926;
-      float stripe = smoothstep(0.5 - uDevStripWidth, 0.5, 0.5 + 0.5 * sin(phase * 6.0));
-      vec3 stripColor = mix(vec3(0.04, 0.95, 1.0), vec3(1.0, 0.86, 0.26), stripe);
-      color *= mix(0.28, 1.0, clamp(uDevBaseSurfaceFade, 0.0, 1.0));
-      devColor = mix(color, stripColor, 0.62 + 0.24 * stripe);
+      vec3 fadedBase = color * mix(0.18, 1.0, clamp(uDevBaseSurfaceFade, 0.0, 1.0));
+      if (uDevBonnetMode == 3) {
+        float density = mix(7.5, 13.0, clamp(uDevBonnetParameter, 0.0, 1.0));
+        float phaseA = dot(position, normalize(vec3(0.84, 0.32, -0.44))) * density + uDevStripPhase * 6.2831853;
+        float phaseB =
+          dot(position, normalize(vec3(-0.38, 0.78, 0.49))) * density * 0.92 -
+          uDevStripPhase * 6.2831853 +
+          uDevBonnetParameter * 6.2831853;
+        float bandWidth = clamp(uDevStripWidth * 5.2, 0.045, 0.88);
+        float bandA = smoothstep(1.0 - bandWidth, 1.0, 0.5 + 0.5 * cos(phaseA));
+        float bandB = smoothstep(1.0 - bandWidth, 1.0, 0.5 + 0.5 * cos(phaseB));
+        float coverage = clamp(max(bandA, bandB) + bandA * bandB * 0.35, 0.0, 1.0);
+        float over = 0.5 + 0.5 * sin(phaseA - phaseB + uDevBonnetParameter * 6.2831853);
+        vec3 stripA = mix(vec3(0.02, 0.95, 1.0), vec3(0.15, 0.42, 1.0), 0.35 + 0.65 * over);
+        vec3 stripB = mix(vec3(1.0, 0.32, 0.86), vec3(1.0, 0.92, 0.28), 1.0 - over);
+        vec3 crossingGlow = vec3(1.0, 0.98, 0.78) * bandA * bandB * 0.38;
+        vec3 weaveColor = mix(stripA, stripB, smoothstep(0.05, 0.9, bandB));
+        devColor = mix(fadedBase, weaveColor + crossingGlow, coverage);
+      } else {
+        float phase =
+          position.x * 2.2 +
+          position.y * 1.3 -
+          position.z * 1.7 +
+          uDevStripPhase * 6.2831853 +
+          uDevBonnetParameter * 3.1415926;
+        float stripe = smoothstep(0.5 - uDevStripWidth, 0.5, 0.5 + 0.5 * sin(phase * 6.0));
+        vec3 stripColor = mix(vec3(0.04, 0.95, 1.0), vec3(1.0, 0.86, 0.26), stripe);
+        devColor = mix(fadedBase, stripColor, 0.62 + 0.24 * stripe);
+      }
     }
 
     if (uDevParallelMode == 2 || uDevParallelMode == 3) {
@@ -1273,6 +1293,53 @@ ${liveDeveloperDomainBlock()}
     return mix(fieldByIndex(fromIndex, q), fieldByIndex(toIndex, q), t);
   }
 
+  float bonnetBand(float phase, float width) {
+    float crest = 0.5 + 0.5 * cos(phase);
+    return smoothstep(1.0 - clamp(width * 4.8, 0.045, 0.82), 1.0, crest);
+  }
+
+  vec3 bonnetWeaveBands(vec3 q) {
+    float density = mix(3.4, 6.7, clamp(uDevBonnetParameter, 0.0, 1.0));
+    float globalPhase = uDevStripPhase * 6.2831853;
+    float phaseA = dot(q, normalize(vec3(0.84, 0.32, -0.44))) * density + globalPhase;
+    float phaseB = dot(q, normalize(vec3(-0.38, 0.78, 0.49))) * (density * 0.92) - globalPhase + uDevBonnetParameter * 6.2831853;
+    float bandA = bonnetBand(phaseA, uDevStripWidth);
+    float bandB = bonnetBand(phaseB, uDevStripWidth);
+    float crossing = bandA * bandB;
+    float over = 0.5 + 0.5 * sin(phaseA - phaseB + uDevBonnetParameter * 6.2831853);
+    return vec3(bandA, bandB, crossing * (over * 2.0 - 1.0));
+  }
+
+  float bonnetStripRelief(vec3 q) {
+    if (uDeveloperMode != 1) {
+      return 0.0;
+    }
+
+    if (uDevBonnetMode == 2) {
+      float phase =
+        q.x * 0.7 +
+        q.y * 0.42 -
+        q.z * 0.55 +
+        uDevStripPhase * 6.2831853 +
+        uDevBonnetParameter * 3.1415926;
+      float band = bonnetBand(phase * 6.0, uDevStripWidth);
+      return (band - 0.32) * uDevStripWidth * 0.26;
+    }
+
+    if (uDevBonnetMode == 3) {
+      vec3 bands = bonnetWeaveBands(q);
+      float coverage = max(bands.x, bands.y);
+      float crossing = bands.x * bands.y;
+      return (
+        coverage * 0.28 -
+        (1.0 - coverage) * 0.045 +
+        crossing * bands.z * 0.16
+      ) * uDevStripWidth;
+    }
+
+    return 0.0;
+  }
+
   float morphedBaseValue(vec3 q) {
     float base = selectedDeveloperBaseField(q);
     if (uDeveloperMode == 1 && uDevBonnetMode == 1) {
@@ -1284,15 +1351,7 @@ ${liveDeveloperDomainBlock()}
         ? mix(pField, gField, smootherstep(t * 2.0))
         : mix(gField, dField, smootherstep((t - 0.5) * 2.0));
     }
-    if (uDeveloperMode == 1 && uDevBonnetMode == 2) {
-      float phase =
-        q.x * 0.7 +
-        q.y * 0.42 -
-        q.z * 0.55 +
-        uDevStripPhase * 6.2831853 +
-        uDevBonnetParameter * 3.1415926;
-      base += sin(phase * 6.0) * uDevStripWidth * 1.35;
-    }
+    base += bonnetStripRelief(q);
     return base;
   }
 
@@ -1326,6 +1385,53 @@ ${liveDeveloperDomainBlock()}
     return ${selectedField};
   }
 
+  float bonnetBand(float phase, float width) {
+    float crest = 0.5 + 0.5 * cos(phase);
+    return smoothstep(1.0 - clamp(width * 4.8, 0.045, 0.82), 1.0, crest);
+  }
+
+  vec3 bonnetWeaveBands(vec3 q) {
+    float density = mix(3.4, 6.7, clamp(uDevBonnetParameter, 0.0, 1.0));
+    float globalPhase = uDevStripPhase * 6.2831853;
+    float phaseA = dot(q, normalize(vec3(0.84, 0.32, -0.44))) * density + globalPhase;
+    float phaseB = dot(q, normalize(vec3(-0.38, 0.78, 0.49))) * (density * 0.92) - globalPhase + uDevBonnetParameter * 6.2831853;
+    float bandA = bonnetBand(phaseA, uDevStripWidth);
+    float bandB = bonnetBand(phaseB, uDevStripWidth);
+    float crossing = bandA * bandB;
+    float over = 0.5 + 0.5 * sin(phaseA - phaseB + uDevBonnetParameter * 6.2831853);
+    return vec3(bandA, bandB, crossing * (over * 2.0 - 1.0));
+  }
+
+  float bonnetStripRelief(vec3 q) {
+    if (uDeveloperMode != 1) {
+      return 0.0;
+    }
+
+    if (uDevBonnetMode == 2) {
+      float phase =
+        q.x * 0.7 +
+        q.y * 0.42 -
+        q.z * 0.55 +
+        uDevStripPhase * 6.2831853 +
+        uDevBonnetParameter * 3.1415926;
+      float band = bonnetBand(phase * 6.0, uDevStripWidth);
+      return (band - 0.32) * uDevStripWidth * 0.26;
+    }
+
+    if (uDevBonnetMode == 3) {
+      vec3 bands = bonnetWeaveBands(q);
+      float coverage = max(bands.x, bands.y);
+      float crossing = bands.x * bands.y;
+      return (
+        coverage * 0.28 -
+        (1.0 - coverage) * 0.045 +
+        crossing * bands.z * 0.16
+      ) * uDevStripWidth;
+    }
+
+    return 0.0;
+  }
+
   float morphedBaseValue(vec3 q) {
     float base = selectedDeveloperBaseField(q);
     if (uDeveloperMode == 1 && uDevBonnetMode == 1) {
@@ -1337,15 +1443,7 @@ ${liveDeveloperDomainBlock()}
         ? mix(pField, gField, smootherstep(t * 2.0))
         : mix(gField, dField, smootherstep((t - 0.5) * 2.0));
     }
-    if (uDeveloperMode == 1 && uDevBonnetMode == 2) {
-      float phase =
-        q.x * 0.7 +
-        q.y * 0.42 -
-        q.z * 0.55 +
-        uDevStripPhase * 6.2831853 +
-        uDevBonnetParameter * 3.1415926;
-      base += sin(phase * 6.0) * uDevStripWidth * 1.35;
-    }
+    base += bonnetStripRelief(q);
     return base;
   }
 
@@ -1399,16 +1497,35 @@ function liveDeveloperColorBlock() {
     }
 
     if (uDevBonnetMode != 0) {
-      float phase =
-        position.x * 2.2 +
-        position.y * 1.3 -
-        position.z * 1.7 +
-        uDevStripPhase * 6.2831853 +
-        uDevBonnetParameter * 3.1415926;
-      float stripe = smoothstep(0.5 - uDevStripWidth, 0.5, 0.5 + 0.5 * sin(phase * 6.0));
-      vec3 stripColor = mix(vec3(0.04, 0.95, 1.0), vec3(1.0, 0.86, 0.26), stripe);
-      color *= mix(0.28, 1.0, clamp(uDevBaseSurfaceFade, 0.0, 1.0));
-      devColor = mix(color, stripColor, 0.62 + 0.24 * stripe);
+      vec3 fadedBase = color * mix(0.18, 1.0, clamp(uDevBaseSurfaceFade, 0.0, 1.0));
+      if (uDevBonnetMode == 3) {
+        float density = mix(7.5, 13.0, clamp(uDevBonnetParameter, 0.0, 1.0));
+        float phaseA = dot(position, normalize(vec3(0.84, 0.32, -0.44))) * density + uDevStripPhase * 6.2831853;
+        float phaseB =
+          dot(position, normalize(vec3(-0.38, 0.78, 0.49))) * density * 0.92 -
+          uDevStripPhase * 6.2831853 +
+          uDevBonnetParameter * 6.2831853;
+        float bandWidth = clamp(uDevStripWidth * 5.2, 0.045, 0.88);
+        float bandA = smoothstep(1.0 - bandWidth, 1.0, 0.5 + 0.5 * cos(phaseA));
+        float bandB = smoothstep(1.0 - bandWidth, 1.0, 0.5 + 0.5 * cos(phaseB));
+        float coverage = clamp(max(bandA, bandB) + bandA * bandB * 0.35, 0.0, 1.0);
+        float over = 0.5 + 0.5 * sin(phaseA - phaseB + uDevBonnetParameter * 6.2831853);
+        vec3 stripA = mix(vec3(0.02, 0.95, 1.0), vec3(0.15, 0.42, 1.0), 0.35 + 0.65 * over);
+        vec3 stripB = mix(vec3(1.0, 0.32, 0.86), vec3(1.0, 0.92, 0.28), 1.0 - over);
+        vec3 crossingGlow = vec3(1.0, 0.98, 0.78) * bandA * bandB * 0.38;
+        vec3 weaveColor = mix(stripA, stripB, smoothstep(0.05, 0.9, bandB));
+        devColor = mix(fadedBase, weaveColor + crossingGlow, coverage);
+      } else {
+        float phase =
+          position.x * 2.2 +
+          position.y * 1.3 -
+          position.z * 1.7 +
+          uDevStripPhase * 6.2831853 +
+          uDevBonnetParameter * 3.1415926;
+        float stripe = smoothstep(0.5 - uDevStripWidth, 0.5, 0.5 + 0.5 * sin(phase * 6.0));
+        vec3 stripColor = mix(vec3(0.04, 0.95, 1.0), vec3(1.0, 0.86, 0.26), stripe);
+        devColor = mix(fadedBase, stripColor, 0.62 + 0.24 * stripe);
+      }
     }
 
     if (uDevParallelMode == 2 || uDevParallelMode == 3) {

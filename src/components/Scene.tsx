@@ -47,6 +47,7 @@ const bonnetStripOptions: Record<DeveloperOverlaySettings['bonnetStripMode'], De
   Off: 'Off',
   'Approx P-G-D Blend': 'Approx P-G-D Blend',
   'Strip Overlay': 'Strip Overlay',
+  'Surface Weave': 'Surface Weave',
 };
 const labyrinthSkeletonOptions: Record<DeveloperOverlaySettings['labyrinthSkeleton'], DeveloperOverlaySettings['labyrinthSkeleton']> = {
   Off: 'Off',
@@ -148,7 +149,7 @@ const developerLabControls = folder(
         'Bonnet Parameter': { value: 0.5, min: 0, max: 1, step: 0.01 },
         'Strip Phase': { value: 0, min: 0, max: 1, step: 0.01 },
         'Strip Width': { value: 0.055, min: 0.01, max: 0.22, step: 0.005 },
-        'Base Surface Fade': { value: 1, min: 0, max: 1, step: 0.01 },
+        'Base Surface Fade': { value: 0.62, min: 0, max: 1, step: 0.01 },
       },
       { collapsed: true },
     ),
@@ -463,7 +464,7 @@ export function Scene() {
         bonnetParameter: read('Bonnet Parameter', 0.5),
         stripPhase: read('Strip Phase', 0),
         stripWidth: read('Strip Width', 0.055),
-        baseSurfaceFade: read('Base Surface Fade', 1),
+        baseSurfaceFade: read('Base Surface Fade', 0.62),
         labyrinthSkeleton: read('Labyrinth Skeleton Mode', 'Off' as DeveloperOverlaySettings['labyrinthSkeleton']),
         skeletonResolution: read('Skeleton Resolution', 'Low' as DeveloperOverlaySettings['skeletonResolution']),
         skeletonThickness: read('Developer Skeleton Thickness', 0.035),

@@ -124,6 +124,7 @@ export function DeveloperOverlays({
   const stripGeometry = useMemo(() => {
     if (developer.bonnetStripMode === 'Off') return null;
     const curves = buildBonnetStripCurves({
+      mode: developer.bonnetStripMode,
       value,
       cropRadius: settings.cropRadius,
       epsilon: developer.finiteDifferenceEpsilon,
@@ -131,16 +132,19 @@ export function DeveloperOverlays({
       width: developer.stripWidth,
       parameter: developer.bonnetParameter,
     });
+    if (curves.length === 0) return null;
     return buildRibbonGeometryFromCurves(curves, {
       value,
-      width: developer.stripWidth,
-      lift: 0.026,
+      width: developer.stripWidth * (developer.bonnetStripMode === 'Surface Weave' ? 0.62 : 1),
+      lift: developer.bonnetStripMode === 'Surface Weave' ? Math.max(0.014, developer.surfaceLift) : 0.026,
       epsilon: developer.finiteDifferenceEpsilon,
+      closed: developer.bonnetStripMode === 'Surface Weave',
     });
   }, [
     developer.bonnetParameter,
     developer.bonnetStripMode,
     developer.finiteDifferenceEpsilon,
+    developer.surfaceLift,
     developer.stripPhase,
     developer.stripWidth,
     settings.cropRadius,
@@ -173,7 +177,7 @@ export function DeveloperOverlays({
         oilSlickIntensity: 0.72,
         fiberDensity: 32,
       });
-      material.depthTest = false;
+      material.depthTest = true;
       material.depthWrite = false;
       return material;
     },
@@ -187,8 +191,10 @@ export function DeveloperOverlays({
         oilSlickIntensity: 0.45,
         fiberDensity: 18,
       });
-      material.depthTest = false;
+      material.depthTest = true;
       material.depthWrite = false;
+      material.polygonOffset = true;
+      material.polygonOffsetFactor = -1;
       return material;
     },
     [],

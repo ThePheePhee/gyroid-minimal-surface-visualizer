@@ -13,7 +13,7 @@ export type GeometryOverlay =
   | 'Asymptotic Directions'
   | 'Minimality Error'
   | 'Focal Distance';
-export type BonnetStripMode = 'Off' | 'Approx P-G-D Blend' | 'Strip Overlay';
+export type BonnetStripMode = 'Off' | 'Approx P-G-D Blend' | 'Strip Overlay' | 'Surface Weave';
 export type LabyrinthSkeletonMode = 'Off' | 'Distance Ridge Points' | 'Ribbonized Skeleton';
 export type SkeletonResolution = 'Low' | 'Medium';
 export type ParallelFocalMode = 'Off' | 'Offset Surface' | 'Focal Highlight' | 'Near-Caustic Shell';
@@ -81,6 +81,7 @@ export function buildRibbonGeometryFromCurves(curves: THREE.Vector3[][], options
   width: number;
   lift: number;
   epsilon: number;
+  closed?: boolean;
 }) {
   const positions: number[] = [];
   const normals: number[] = [];
@@ -91,22 +92,35 @@ export function buildRibbonGeometryFromCurves(curves: THREE.Vector3[][], options
 
   for (const curve of curves) {
     if (curve.length < 2) continue;
+    const closed = Boolean(options.closed && curve.length > 3);
+    let previousWidth: THREE.Vector3 | undefined;
+
     for (let i = 0; i < curve.length; i++) {
       const point = curve[i];
-      const prev = curve[Math.max(0, i - 1)];
-      const next = curve[Math.min(curve.length - 1, i + 1)];
+      const prev = closed ? curve[(i - 1 + curve.length) % curve.length] : curve[Math.max(0, i - 1)];
+      const next = closed ? curve[(i + 1) % curve.length] : curve[Math.min(curve.length - 1, i + 1)];
       const tangent = next.clone().sub(prev).normalize();
       const jet = evaluateSurfaceJet(options.value, point, options.epsilon);
-      const widthDirection = jet.normal.clone().cross(tangent).normalize();
+      let widthDirection = jet.normal.clone().cross(tangent);
+      if (widthDirection.lengthSq() < 1e-8) {
+        widthDirection = stablePerpendicular(tangent);
+      } else {
+        widthDirection.normalize();
+      }
+      if (previousWidth && widthDirection.dot(previousWidth) < 0) {
+        widthDirection.multiplyScalar(-1);
+      }
+      previousWidth = widthDirection.clone();
       const left = point.clone().addScaledVector(widthDirection, -options.width).addScaledVector(jet.normal, options.lift);
       const right = point.clone().addScaledVector(widthDirection, options.width).addScaledVector(jet.normal, options.lift);
       positions.push(left.x, left.y, left.z, right.x, right.y, right.z);
       normals.push(jet.normal.x, jet.normal.y, jet.normal.z, jet.normal.x, jet.normal.y, jet.normal.z);
       across.push(-1, 1);
-      along.push(i / Math.max(1, curve.length - 1), i / Math.max(1, curve.length - 1));
-      if (i < curve.length - 1) {
+      along.push(i / Math.max(1, curve.length - (closed ? 0 : 1)), i / Math.max(1, curve.length - (closed ? 0 : 1)));
+      if (i < curve.length - 1 || closed) {
         const a = vertexOffset + i * 2;
-        indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+        const b = vertexOffset + ((i + 1) % curve.length) * 2;
+        indices.push(a, a + 1, b, a + 1, b + 1, b);
       }
     }
     vertexOffset += curve.length * 2;
@@ -123,6 +137,7 @@ export function buildRibbonGeometryFromCurves(curves: THREE.Vector3[][], options
 }
 
 export function buildBonnetStripCurves(options: {
+  mode: BonnetStripMode;
   value: SurfaceValue;
   cropRadius: number;
   epsilon: number;
@@ -130,6 +145,14 @@ export function buildBonnetStripCurves(options: {
   width: number;
   parameter: number;
 }) {
+  if (options.mode === 'Off' || options.mode === 'Approx P-G-D Blend' || options.mode === 'Strip Overlay') {
+    return [];
+  }
+
+  if (options.mode === 'Surface Weave') {
+    return buildProjectedSurfaceWeave(options);
+  }
+
   const seeds = makeSurfaceSeeds({
     value: options.value,
     cropRadius: options.cropRadius,
@@ -151,6 +174,47 @@ export function buildBonnetStripCurves(options: {
       phase: options.phase,
     }),
   );
+}
+
+function buildProjectedSurfaceWeave(options: {
+  value: SurfaceValue;
+  cropRadius: number;
+  epsilon: number;
+  phase: number;
+  width: number;
+  parameter: number;
+}) {
+  const loops: THREE.Vector3[][] = [];
+  const sampleCount = 112;
+  const attemptCount = 30;
+  const targetCount = Math.round(10 + options.parameter * 10);
+  const phase = options.phase * Math.PI * 2;
+
+  for (let attempt = 0; attempt < attemptCount && loops.length < targetCount; attempt++) {
+    const family = weaveLoopFamilies[(attempt + Math.floor(options.parameter * 7)) % weaveLoopFamilies.length];
+    const lane = Math.floor(attempt / weaveLoopFamilies.length);
+    const side = lane % 2 === 0 ? 1 : -1;
+    const depth = Math.floor(lane / 2);
+    const offset = side * Math.min(options.cropRadius * 0.62, (depth + 0.45) * options.width * options.cropRadius * 5.2);
+    const radius = options.cropRadius * THREE.MathUtils.clamp(0.46 + ((attempt * 29) % 31) / 100, 0.42, 0.75);
+    const windingA = 1 + ((attempt + Math.round(options.parameter * 10)) % 2);
+    const windingB = 2 + ((attempt + Math.round(options.phase * 10)) % 3);
+    const seed = makeWeaveSeedLoop(family, {
+      offset,
+      phase: phase + attempt * 0.61,
+      radius,
+      cropRadius: options.cropRadius,
+      sampleCount,
+      windingA,
+      windingB,
+    });
+    const projected = projectWeaveLoop(seed, options);
+    if (projected && isContinuousLoop(projected, options.cropRadius)) {
+      loops.push(projected);
+    }
+  }
+
+  return loops;
 }
 
 export function buildLabyrinthSkeletonApproximation(options: {
@@ -239,4 +303,129 @@ function selectRibbonDirection(jet: ReturnType<typeof evaluateSurfaceJet>, field
   if (field === 'Asymptotic +') return jet.asymptoticDirections[0].clone();
   if (field === 'Asymptotic -') return jet.asymptoticDirections[1].clone();
   return jet.principalDirections[0].clone();
+}
+
+const weaveLoopFamilies = [
+  {
+    u: new THREE.Vector3(1, 0, 0),
+    v: new THREE.Vector3(0, 1, 0),
+    w: new THREE.Vector3(0, 0, 1),
+  },
+  {
+    u: new THREE.Vector3(0, 1, 0),
+    v: new THREE.Vector3(0, 0, 1),
+    w: new THREE.Vector3(1, 0, 0),
+  },
+  {
+    u: new THREE.Vector3(0, 0, 1),
+    v: new THREE.Vector3(1, 0, 0),
+    w: new THREE.Vector3(0, 1, 0),
+  },
+  makeWeaveFrame(new THREE.Vector3(1, 1, 1)),
+  makeWeaveFrame(new THREE.Vector3(1, -1, 1)),
+  makeWeaveFrame(new THREE.Vector3(-1, 1, 1)),
+];
+
+function makeWeaveSeedLoop(
+  frame: { u: THREE.Vector3; v: THREE.Vector3; w: THREE.Vector3 },
+  options: {
+    offset: number;
+    phase: number;
+    radius: number;
+    cropRadius: number;
+    sampleCount: number;
+    windingA: number;
+    windingB: number;
+  },
+) {
+  const points: THREE.Vector3[] = [];
+  const center = frame.w.clone().multiplyScalar(options.offset);
+  const radialScale = Math.sqrt(Math.max(0.16, 1 - (Math.abs(options.offset) / options.cropRadius) ** 2));
+  const radius = options.radius * radialScale;
+
+  for (let i = 0; i < options.sampleCount; i++) {
+    const t = (i / options.sampleCount) * Math.PI * 2;
+    const braid = Math.sin(t * options.windingB + options.phase) * options.cropRadius * 0.075;
+    points.push(
+      center
+        .clone()
+        .addScaledVector(frame.u, Math.cos(t * options.windingA + options.phase * 0.23) * radius)
+        .addScaledVector(frame.v, Math.sin(t * options.windingA + options.phase * 0.23) * radius)
+        .addScaledVector(frame.w, braid),
+    );
+  }
+
+  return points;
+}
+
+function projectWeaveLoop(
+  seed: THREE.Vector3[],
+  options: {
+    value: SurfaceValue;
+    cropRadius: number;
+    epsilon: number;
+  },
+) {
+  let loop = seed.map((point) => projectWeavePoint(point, options));
+  if (loop.some((point) => point === null)) {
+    return null;
+  }
+
+  for (let iteration = 0; iteration < 7; iteration++) {
+    const points = loop as THREE.Vector3[];
+    const smoothed = points.map((point, index) => {
+      const previous = points[(index - 1 + points.length) % points.length];
+      const next = points[(index + 1) % points.length];
+      return point.clone().multiplyScalar(0.64).addScaledVector(previous, 0.18).addScaledVector(next, 0.18);
+    });
+    loop = smoothed.map((point) => projectWeavePoint(point, options));
+    if (loop.some((point) => point === null)) {
+      return null;
+    }
+  }
+
+  return loop as THREE.Vector3[];
+}
+
+function projectWeavePoint(
+  seed: THREE.Vector3,
+  options: {
+    value: SurfaceValue;
+    cropRadius: number;
+    epsilon: number;
+  },
+) {
+  const maxRadius = options.cropRadius * 0.965;
+  const point = seed.clone();
+  if (point.length() > maxRadius) {
+    point.setLength(maxRadius);
+  }
+
+  const projected = projectToSurface(options.value, point, options.epsilon, 12);
+  if (!Number.isFinite(projected.x) || projected.length() > options.cropRadius * 0.992) {
+    return null;
+  }
+
+  return Math.abs(options.value(projected)) < Math.max(0.014, options.epsilon * 3.5) ? projected : null;
+}
+
+function isContinuousLoop(points: THREE.Vector3[], cropRadius: number) {
+  let maxSegment = 0;
+  for (let index = 0; index < points.length; index++) {
+    const next = points[(index + 1) % points.length];
+    maxSegment = Math.max(maxSegment, points[index].distanceTo(next));
+  }
+  return maxSegment < cropRadius * 0.24;
+}
+
+function makeWeaveFrame(normalInput: THREE.Vector3) {
+  const w = normalInput.clone().normalize();
+  const u = stablePerpendicular(w);
+  const v = new THREE.Vector3().crossVectors(w, u).normalize();
+  return { u, v, w };
+}
+
+function stablePerpendicular(direction: THREE.Vector3) {
+  const axis = Math.abs(direction.y) < 0.82 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  return new THREE.Vector3().crossVectors(direction, axis).normalize();
 }
