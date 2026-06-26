@@ -1,7 +1,7 @@
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { Leva, useControls } from 'leva';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { surfacePresets, type SurfacePreset } from '../math/scalarFields';
 import type { FilmMaterial, KnotPreset } from '../math/knotGeometry';
@@ -75,7 +75,8 @@ export function Scene() {
   const maxDevicePixelRatio = isOpera ? 1 : 1.25;
   const defaultRaySteps = isOpera ? 128 : 192;
   const defaultRenderMode = 'GPU continuous raymarch';
-  const controls = useControls({
+  const [controls, setControls] = useControls(
+    () => ({
     'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions },
     'Render mode': { value: defaultRenderMode, options: renderModeOptions, render: whenSurface },
     'GPU ray steps': { value: defaultRaySteps, min: 64, max: 384, step: 16, render: whenSurface },
@@ -163,10 +164,22 @@ export function Scene() {
     'Film material': { value: 'subtle rainbow interference' as FilmMaterial, options: filmMaterialOptions, render: whenKnotType('Knot-Bounded Minimal Film') },
     'Torus p': { value: 2, min: 1, max: 8, step: 1, render: whenKnotType('Knot-Bounded Minimal Film') },
     'Torus q': { value: 3, min: 1, max: 9, step: 1, render: whenKnotType('Knot-Bounded Minimal Film') },
-  });
+    }),
+    [defaultRaySteps, defaultRenderMode],
+  );
 
   const [autoMorph, setAutoMorph] = useState(0);
   const [autoKnotMorph, setAutoKnotMorph] = useState(0);
+  const hasAppliedInitialRenderMode = useRef(false);
+
+  useEffect(() => {
+    if (hasAppliedInitialRenderMode.current) {
+      return;
+    }
+
+    setControls({ 'Render mode': 'GPU continuous raymarch' });
+    hasAppliedInitialRenderMode.current = true;
+  }, [setControls]);
 
   useEffect(() => {
     if (!controls['Animate morph'] || controls['Morph path'] === 'No morph') {
