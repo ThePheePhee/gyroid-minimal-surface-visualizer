@@ -7,6 +7,7 @@ import { surfacePresets, type SurfacePreset } from '../math/scalarFields';
 import type { FilmMaterial, KnotPreset } from '../math/knotGeometry';
 import type { WeavePreset, WeaveRenderStyle } from '../math/weaveCurves';
 import type { MorphPath } from '../rendering/geometryCache';
+import type { ComplementSide } from '../rendering/raymarchMaterial';
 import { colorModes, type ColorMode } from '../rendering/surfaceMaterial';
 import { GpuSurface } from './GpuSurface';
 import { KnotModeScene, type KnotRelationshipType } from './KnotModeScene';
@@ -22,6 +23,10 @@ const morphPathOptions: Record<MorphPath, MorphPath> = {
   'No morph': 'No morph',
   'A to B pulse': 'A to B pulse',
   'Cycle all families': 'Cycle all families',
+};
+const complementSideOptions: Record<ComplementSide, ComplementSide> = {
+  'positive labyrinth': 'positive labyrinth',
+  'negative labyrinth': 'negative labyrinth',
 };
 const visualizationModeOptions = {
   'Surface Mode': 'Surface Mode',
@@ -58,6 +63,7 @@ type LevaGet = (path: string) => unknown;
 const whenSurface = (get: LevaGet) => get('Visualization Mode') === 'Surface Mode';
 const whenSurfaceGpu = (get: LevaGet) =>
   get('Visualization Mode') === 'Surface Mode' && get('Render mode') === 'GPU continuous raymarch';
+const whenComplementSolid = (get: LevaGet) => whenSurfaceGpu(get) && get('Complement solid') === true;
 const whenKnot = (get: LevaGet) => get('Visualization Mode') === 'Knot Mode';
 const whenKnotSurfaceRelation = (get: LevaGet) =>
   get('Visualization Mode') === 'Knot Mode' && get('Knot Relationship Type') !== 'Knot-Bounded Minimal Film';
@@ -88,6 +94,11 @@ export function Scene() {
     'Crop softness': { value: 0.09, min: 0.01, max: 0.5, step: 0.01, render: whenSurface },
     'Visual shell thickness': { value: 0.04, min: 0, max: 0.16, step: 0.005, render: whenSurface },
     'Complement solid': { value: false, render: whenSurfaceGpu },
+    'Complement side': {
+      value: 'positive labyrinth' as ComplementSide,
+      options: complementSideOptions,
+      render: whenComplementSolid,
+    },
     Wireframe: { value: false, render: whenSurface },
     'Smooth shading': { value: true, render: whenSurface },
     'Color mode': { value: 'rainbow curvature-like bands' as ColorMode, options: colorOptions, render: whenSurface },
@@ -325,6 +336,7 @@ export function Scene() {
               breathing={controls['Whole-object breathing']}
               twist={controls['Psychedelic twist']}
               complementSolid={controls['Complement solid']}
+              complementSide={controls['Complement side']}
             />
           ) : (
             <SurfaceMesh

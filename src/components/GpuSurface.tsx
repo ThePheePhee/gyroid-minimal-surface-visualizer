@@ -2,6 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo } from 'react';
 import type { SurfaceSettings } from '../rendering/geometryCache';
 import { createRaymarchMaterial, updateRaymarchMaterial } from '../rendering/raymarchMaterial';
+import type { ComplementSide } from '../rendering/raymarchMaterial';
 import type { ColorMode } from '../rendering/surfaceMaterial';
 
 interface GpuSurfaceProps {
@@ -15,6 +16,7 @@ interface GpuSurfaceProps {
   breathing: number;
   twist: number;
   complementSolid: boolean;
+  complementSide: ComplementSide;
 }
 
 export function GpuSurface({
@@ -28,6 +30,7 @@ export function GpuSurface({
   breathing,
   twist,
   complementSolid,
+  complementSide,
 }: GpuSurfaceProps) {
   const shaderSettings = useMemo(
     () => ({
@@ -52,12 +55,14 @@ export function GpuSurface({
       breathing,
       twist,
       complementSolid,
+      complementSide,
     });
   }, [
     autoRotationSpeed,
     breathing,
     colorMode,
     complementSolid,
+    complementSide,
     material,
     raySteps,
     settings,

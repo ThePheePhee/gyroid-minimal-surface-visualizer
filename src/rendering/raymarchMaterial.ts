@@ -3,6 +3,8 @@ import { colorModeIndex, type ColorMode } from './surfaceMaterial';
 import type { MorphPath } from './geometryCache';
 import type { SurfacePreset } from '../math/scalarFields';
 
+export type ComplementSide = 'positive labyrinth' | 'negative labyrinth';
+
 type RaymarchShaderSettings = {
   preset: SurfacePreset;
   morphTarget: SurfacePreset;
@@ -213,6 +215,7 @@ const fragmentShader = /* glsl */ `
   uniform float uSurfaceThickness;
   uniform float uRimStrength;
   uniform int uComplementMode;
+  uniform int uComplementSide;
 
   const int MAX_STEPS = 768;
   const int REFINE_STEPS = 7;
@@ -420,6 +423,11 @@ const fragmentShader = /* glsl */ `
     return farT > 0.0;
   }
 
+  float complementField(vec3 p) {
+    float side = uComplementSide == 1 ? 1.0 : -1.0;
+    return morphedField(p) * side;
+  }
+
   vec3 estimateGradient(vec3 p) {
     float eps = max(0.0035, 0.012 / max(0.8, uFrequency));
     vec2 e = vec2(eps, 0.0);
@@ -494,7 +502,7 @@ const fragmentShader = /* glsl */ `
     float stepSize = travel / float(max(uRaySteps, 1));
     float epsilonT = min(stepSize * 0.25, 0.012);
     float previousT = startT + epsilonT;
-    float previousValue = morphedField(origin + direction * previousT);
+    float previousValue = complementField(origin + direction * previousT);
 
     if (previousValue >= 0.0) {
       hitPosition = origin + direction * startT;
@@ -507,14 +515,14 @@ const fragmentShader = /* glsl */ `
       if (i > uRaySteps) break;
       float currentT = startT + stepSize * float(i);
       vec3 p = origin + direction * currentT;
-      float currentValue = morphedField(p);
+      float currentValue = complementField(p);
 
       if (previousValue < 0.0 && currentValue >= 0.0) {
         float lo = previousT;
         float hi = currentT;
         for (int j = 0; j < REFINE_STEPS; j++) {
           float mid = 0.5 * (lo + hi);
-          float midValue = morphedField(origin + direction * mid);
+          float midValue = complementField(origin + direction * mid);
           if (midValue < 0.0) {
             lo = mid;
           } else {
@@ -575,6 +583,57 @@ const fragmentShader = /* glsl */ `
     return lit;
   }
 
+  vec3 shadeComplementSolid(vec3 position, vec3 normal, vec3 viewDir, float hitKind) {
+    vec3 n = normalize(normal);
+    vec3 lightDir = normalize(vec3(-0.35, 0.75, 0.55));
+    vec3 coolLightDir = normalize(vec3(0.65, -0.35, -0.62));
+    float diffuse = max(dot(n, lightDir), 0.0);
+    float coolDiffuse = max(dot(n, coolLightDir), 0.0);
+    float radius = clamp(length(position) / uCropRadius, 0.0, 1.0);
+    float cropWall = smoothstep(0.4, 1.0, hitKind);
+    float innerWall = 1.0 - cropWall;
+
+    float broadBand = 0.5 + 0.5 * sin(
+      position.x * 5.7 +
+      position.y * 3.9 -
+      position.z * 4.8 +
+      radius * 14.0 +
+      uTime * 0.18
+    );
+    float fineBand = 0.5 + 0.5 * sin(
+      position.x * 17.0 -
+      position.y * 11.0 +
+      position.z * 13.0 +
+      radius * 31.0
+    );
+
+    vec3 pearl = mix(vec3(0.92, 0.87, 1.0), vec3(1.0, 0.96, 0.78), smootherstep(radius));
+    vec3 oil = mix(vec3(0.62, 0.18, 0.92), vec3(1.0, 0.34, 0.78), broadBand);
+    oil = mix(oil, vec3(1.0, 0.86, 0.38), fineBand * 0.24);
+
+    vec3 base = mix(oil, pearl, 0.48 + cropWall * 0.34);
+    if (uColorMode == 2) {
+      base = pow(normalize(n) * 0.5 + 0.5, vec3(0.72));
+      base = mix(base, pearl, cropWall * 0.45);
+    } else if (uColorMode == 3) {
+      base = pearl;
+    } else if (uColorMode == 4) {
+      base = mix(vec3(0.88, 0.84, 0.7), vec3(1.0), smootherstep(radius));
+    }
+
+    float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+    vec3 halfDir = normalize(lightDir + viewDir);
+    float specular = pow(max(dot(n, halfDir), 0.0), 96.0);
+    float cropRim = smoothstep(0.88, 1.0, radius);
+    vec3 rimColor = mix(vec3(0.88, 0.92, 1.0), vec3(1.0, 0.86, 0.42), 0.45);
+
+    vec3 lit = base * (0.34 + diffuse * 0.74 + coolDiffuse * 0.16);
+    lit += vec3(specular) * (0.72 + innerWall * 0.22);
+    lit += rimColor * (fresnel * 0.62 + cropRim * cropRim * 0.74) * uRimStrength;
+    lit += base * 0.08;
+    return lit;
+  }
+
   void main() {
     vec3 rayOrigin = uCameraPosition;
     vec3 rayDirection = normalize(vWorldPosition - rayOrigin);
@@ -597,13 +656,21 @@ const fragmentShader = /* glsl */ `
       }
     }
 
-    vec3 normal = hitKind > 0.5 ? normalize(hitPosition) : estimateNormal(hitPosition);
     vec3 viewDir = normalize(rayOrigin - hitPosition);
+    vec3 normal = estimateNormal(hitPosition);
+    if (uComplementMode == 1) {
+      float complementSide = uComplementSide == 1 ? 1.0 : -1.0;
+      normal = hitKind > 0.5
+        ? normalize(hitPosition)
+        : -complementSide * normal;
+    }
     if (dot(normal, viewDir) < 0.0) {
       normal = -normal;
     }
 
-    vec3 color = shadeSurface(hitPosition, normal, viewDir, hitGradient);
+    vec3 color = uComplementMode == 1
+      ? shadeComplementSolid(hitPosition, normal, viewDir, hitKind)
+      : shadeSurface(hitPosition, normal, viewDir, hitGradient);
     gl_FragColor = vec4(color, 1.0);
   }
 `;
@@ -678,6 +745,7 @@ export function createRaymarchMaterial(settings: RaymarchShaderSettings) {
       uSurfaceThickness: { value: 0.04 },
       uRimStrength: { value: 1.2 },
       uComplementMode: { value: 0 },
+      uComplementSide: { value: 1 },
     },
   });
 }
@@ -704,6 +772,7 @@ export function updateRaymarchMaterial(
     breathing: number;
     twist: number;
     complementSolid: boolean;
+    complementSide: ComplementSide;
   },
 ) {
   const { uniforms } = material;
@@ -725,6 +794,7 @@ export function updateRaymarchMaterial(
   uniforms.uTwist.value = options.twist;
   uniforms.uSurfaceThickness.value = settings.shellThickness;
   uniforms.uComplementMode.value = options.complementSolid ? 1 : 0;
+  uniforms.uComplementSide.value = options.complementSide === 'negative labyrinth' ? -1 : 1;
   uniforms.uRimStrength.value =
     options.colorMode === 'metallic white/gold rim emphasis'
       ? 2.2
