@@ -185,9 +185,9 @@ function buildProjectedSurfaceWeave(options: {
   parameter: number;
 }) {
   const loops: THREE.Vector3[][] = [];
-  const sampleCount = 112;
-  const attemptCount = 30;
-  const targetCount = Math.round(10 + options.parameter * 10);
+  const sampleCount = 80;
+  const attemptCount = 22;
+  const targetCount = Math.round(8 + options.parameter * 8);
   const phase = options.phase * Math.PI * 2;
 
   for (let attempt = 0; attempt < attemptCount && loops.length < targetCount; attempt++) {
@@ -214,6 +214,154 @@ function buildProjectedSurfaceWeave(options: {
     }
   }
 
+  if (loops.length < Math.max(3, Math.floor(targetCount * 0.5))) {
+    const sections = buildPlanarSectionWeave(options, targetCount - loops.length);
+    loops.push(...sections);
+  }
+
+  return loops.slice(0, targetCount);
+}
+
+function buildPlanarSectionWeave(
+  options: {
+    value: SurfaceValue;
+    cropRadius: number;
+    epsilon: number;
+    phase: number;
+    parameter: number;
+  },
+  requestedCount: number,
+) {
+  const loops: THREE.Vector3[][] = [];
+  const gridSize = 34;
+  const extent = options.cropRadius * 0.92;
+  const offsets = [-0.48, -0.24, 0, 0.24, 0.48];
+  const familyOffset = Math.floor(options.parameter * weaveLoopFamilies.length);
+
+  for (let familyIndex = 0; familyIndex < weaveLoopFamilies.length && loops.length < requestedCount; familyIndex++) {
+    const frame = weaveLoopFamilies[(familyIndex + familyOffset) % weaveLoopFamilies.length];
+    for (const normalizedOffset of offsets) {
+      if (loops.length >= requestedCount) break;
+      const planeOffset = normalizedOffset * options.cropRadius;
+      const segments = samplePlanarSurfaceSegments(options, frame, planeOffset, extent, gridSize);
+      const sectionLoops = stitchClosedSegments(segments, (2 * extent * 0.02) / gridSize);
+      for (const section of sectionLoops) {
+        const projected = section.map((point) => projectToSurface(options.value, point, options.epsilon, 4));
+        if (projected.length >= 12 && isContinuousLoop(projected, options.cropRadius)) {
+          loops.push(projected);
+          if (loops.length >= requestedCount) break;
+        }
+      }
+    }
+  }
+
+  return loops;
+}
+
+function samplePlanarSurfaceSegments(
+  options: { value: SurfaceValue; cropRadius: number },
+  frame: { u: THREE.Vector3; v: THREE.Vector3; w: THREE.Vector3 },
+  planeOffset: number,
+  extent: number,
+  gridSize: number,
+) {
+  const points: THREE.Vector3[][] = [];
+  const values: number[][] = [];
+  const maxRadius = options.cropRadius * 0.965;
+  for (let yIndex = 0; yIndex <= gridSize; yIndex++) {
+    const rowPoints: THREE.Vector3[] = [];
+    const rowValues: number[] = [];
+    const y = -extent + (2 * extent * yIndex) / gridSize;
+    for (let xIndex = 0; xIndex <= gridSize; xIndex++) {
+      const x = -extent + (2 * extent * xIndex) / gridSize;
+      const point = frame.w
+        .clone()
+        .multiplyScalar(planeOffset)
+        .addScaledVector(frame.u, x)
+        .addScaledVector(frame.v, y);
+      rowPoints.push(point);
+      rowValues.push(point.length() <= maxRadius ? options.value(point) : Number.NaN);
+    }
+    points.push(rowPoints);
+    values.push(rowValues);
+  }
+
+  const segments: Array<[THREE.Vector3, THREE.Vector3]> = [];
+  for (let y = 0; y < gridSize; y++) {
+    for (let x = 0; x < gridSize; x++) {
+      const corners = [
+        { point: points[y][x], value: values[y][x] },
+        { point: points[y][x + 1], value: values[y][x + 1] },
+        { point: points[y + 1][x + 1], value: values[y + 1][x + 1] },
+        { point: points[y + 1][x], value: values[y + 1][x] },
+      ];
+      if (corners.some((corner) => !Number.isFinite(corner.value))) continue;
+      const crossings: THREE.Vector3[] = [];
+      for (let edge = 0; edge < 4; edge++) {
+        const a = corners[edge];
+        const b = corners[(edge + 1) % 4];
+        if ((a.value < 0) === (b.value < 0)) continue;
+        const t = a.value / (a.value - b.value);
+        crossings.push(a.point.clone().lerp(b.point, t));
+      }
+      if (crossings.length === 2) {
+        segments.push([crossings[0], crossings[1]]);
+      } else if (crossings.length === 4) {
+        const centerValue = corners.reduce((sum, corner) => sum + corner.value, 0) * 0.25;
+        if ((centerValue < 0) === (corners[0].value < 0)) {
+          segments.push([crossings[0], crossings[3]], [crossings[1], crossings[2]]);
+        } else {
+          segments.push([crossings[0], crossings[1]], [crossings[2], crossings[3]]);
+        }
+      }
+    }
+  }
+  return segments;
+}
+
+function stitchClosedSegments(segments: Array<[THREE.Vector3, THREE.Vector3]>, tolerance: number) {
+  type Node = { point: THREE.Vector3; neighbors: Set<string> };
+  const nodes = new Map<string, Node>();
+  const keyFor = (point: THREE.Vector3) =>
+    `${Math.round(point.x / tolerance)}:${Math.round(point.y / tolerance)}:${Math.round(point.z / tolerance)}`;
+
+  for (const [a, b] of segments) {
+    const aKey = keyFor(a);
+    const bKey = keyFor(b);
+    if (aKey === bKey) continue;
+    const aNode = nodes.get(aKey) ?? { point: a.clone(), neighbors: new Set<string>() };
+    const bNode = nodes.get(bKey) ?? { point: b.clone(), neighbors: new Set<string>() };
+    aNode.neighbors.add(bKey);
+    bNode.neighbors.add(aKey);
+    nodes.set(aKey, aNode);
+    nodes.set(bKey, bNode);
+  }
+
+  const loops: THREE.Vector3[][] = [];
+  const visited = new Set<string>();
+  for (const [startKey, startNode] of nodes) {
+    if (visited.has(startKey) || startNode.neighbors.size !== 2) continue;
+    const component: string[] = [];
+    let previousKey = '';
+    let currentKey = startKey;
+    let closed = false;
+    while (component.length <= nodes.size) {
+      const current = nodes.get(currentKey);
+      if (!current || current.neighbors.size !== 2) break;
+      component.push(currentKey);
+      visited.add(currentKey);
+      const nextKey = [...current.neighbors].find((key) => key !== previousKey);
+      if (!nextKey) break;
+      if (nextKey === startKey) {
+        closed = component.length >= 12;
+        break;
+      }
+      if (visited.has(nextKey)) break;
+      previousKey = currentKey;
+      currentKey = nextKey;
+    }
+    if (closed) loops.push(component.map((key) => nodes.get(key)!.point.clone()));
+  }
   return loops;
 }
 
@@ -226,7 +374,8 @@ export function buildLabyrinthSkeletonApproximation(options: {
 }) {
   const steps = options.resolution === 'Low' ? 18 : 24;
   const spacing = (options.cropRadius * 2) / (steps - 1);
-  const candidates: Array<{ p: THREE.Vector3; d: number }> = [];
+  const candidates: Array<{ p: THREE.Vector3; d: number; ix: number; iy: number; iz: number }> = [];
+  const candidateGrid = new Map<string, Array<(typeof candidates)[number]>>();
   for (let ix = 0; ix < steps; ix++) {
     for (let iy = 0; iy < steps; iy++) {
       for (let iz = 0; iz < steps; iz++) {
@@ -238,7 +387,12 @@ export function buildLabyrinthSkeletonApproximation(options: {
         if (p.length() > options.cropRadius * 0.96) continue;
         const jet = evaluateSurfaceJet(options.value, p, options.epsilon);
         if (options.side * jet.f < 0 || jet.gradNorm < 1e-5) continue;
-        candidates.push({ p, d: Math.abs(jet.f) / jet.gradNorm });
+        const candidate = { p, d: Math.abs(jet.f) / jet.gradNorm, ix, iy, iz };
+        candidates.push(candidate);
+        const key = `${ix}:${iy}:${iz}`;
+        const cell = candidateGrid.get(key);
+        if (cell) cell.push(candidate);
+        else candidateGrid.set(key, [candidate]);
       }
     }
   }
@@ -247,12 +401,23 @@ export function buildLabyrinthSkeletonApproximation(options: {
   const colors: number[] = [];
   for (const candidate of candidates) {
     let neighborCount = 0;
-    for (const other of candidates) {
-      if (other === candidate) continue;
-      if (other.p.distanceToSquared(candidate.p) < spacing * spacing * 2.2 && other.d > candidate.d * 1.04) {
-        neighborCount++;
+    for (let dx = -1; dx <= 1 && neighborCount <= 1; dx++) {
+      for (let dy = -1; dy <= 1 && neighborCount <= 1; dy++) {
+        for (let dz = -1; dz <= 1 && neighborCount <= 1; dz++) {
+          const cell = candidateGrid.get(`${candidate.ix + dx}:${candidate.iy + dy}:${candidate.iz + dz}`);
+          if (!cell) continue;
+          for (const other of cell) {
+            if (other === candidate) continue;
+            if (
+              other.p.distanceToSquared(candidate.p) < spacing * spacing * 2.2 &&
+              other.d > candidate.d * 1.04
+            ) {
+              neighborCount++;
+            }
+            if (neighborCount > 1) break;
+          }
+        }
       }
-      if (neighborCount > 1) break;
     }
     if (neighborCount <= 1 && candidate.d > spacing * 0.45) {
       positions.push(candidate.p.x, candidate.p.y, candidate.p.z);
@@ -371,7 +536,7 @@ function projectWeaveLoop(
     return null;
   }
 
-  for (let iteration = 0; iteration < 7; iteration++) {
+  for (let iteration = 0; iteration < 4; iteration++) {
     const points = loop as THREE.Vector3[];
     const smoothed = points.map((point, index) => {
       const previous = points[(index - 1 + points.length) % points.length];
@@ -401,7 +566,7 @@ function projectWeavePoint(
     point.setLength(maxRadius);
   }
 
-  const projected = projectToSurface(options.value, point, options.epsilon, 12);
+  const projected = projectToSurface(options.value, point, options.epsilon, 8);
   if (!Number.isFinite(projected.x) || projected.length() > options.cropRadius * 0.992) {
     return null;
   }

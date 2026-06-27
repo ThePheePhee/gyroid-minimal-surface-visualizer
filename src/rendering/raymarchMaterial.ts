@@ -295,7 +295,7 @@ const fragmentShader = /* glsl */ `
   uniform float uDevScrewSharpness;
   uniform int uDevMinimalityDiagnostic;
 
-  const int MAX_STEPS = 768;
+  const int MAX_STEPS = 384;
   const int REFINE_STEPS = 7;
   const float SURFACE_COUNT = 11.0;
 
@@ -993,10 +993,11 @@ const fragmentShader = /* glsl */ `
 `;
 
 function buildFragmentShader(settings: RaymarchShaderSettings) {
+  if (settings.developerShaderMode === 'live') {
+    return buildLiveFragmentShader(fragmentShader, liveUniversalMorphedFieldBlock());
+  }
+
   if (settings.morphPath === 'Cycle all families') {
-    if (settings.developerShaderMode === 'live') {
-      return buildLiveFragmentShader(fragmentShader, liveCycleMorphedFieldBlock());
-    }
     return buildLeanFragmentShader(fragmentShader, cycleMorphedFieldBlock());
   }
 
@@ -1130,13 +1131,6 @@ function buildFragmentShader(settings: RaymarchShaderSettings) {
   const shader = fragmentShader
     .replace(/ {2}float gyroid\(vec3 p\) \{[\s\S]*? {2}vec3 animatedDomain/, fieldSection)
     .replace(/ {2}float morphedBaseValue\(vec3 q\) \{[\s\S]*? {2}bool raySphere/, morphedBaseValue);
-
-  if (settings.developerShaderMode === 'live') {
-    return buildLiveFragmentShader(
-      shader,
-      liveMorphedFieldBlock(settings.morphPath, presetField, targetField),
-    );
-  }
 
   const leanMorphedField =
     settings.morphPath === 'A to B pulse'
@@ -1320,15 +1314,25 @@ function liveDeveloperDomainBlock() {
 `;
 }
 
-function liveCycleMorphedFieldBlock() {
+function liveUniversalMorphedFieldBlock() {
   return /* glsl */ `
 ${liveDeveloperDomainBlock()}
   float selectedDeveloperBaseField(vec3 q) {
-    float scaled = fract(uMorphAmount) * SURFACE_COUNT;
-    int fromIndex = int(floor(scaled));
-    int toIndex = int(mod(float(fromIndex + 1), SURFACE_COUNT));
-    float t = smootherstep(fract(scaled));
-    return mix(fieldByIndex(fromIndex, q), fieldByIndex(toIndex, q), t);
+    if (uMorphPath == 2) {
+      float scaled = fract(uMorphAmount) * SURFACE_COUNT;
+      int fromIndex = int(floor(scaled));
+      int toIndex = int(mod(float(fromIndex + 1), SURFACE_COUNT));
+      float t = smootherstep(fract(scaled));
+      return mix(fieldByIndex(fromIndex, q), fieldByIndex(toIndex, q), t);
+    }
+    if (uMorphPath == 1) {
+      return mix(
+        fieldByIndex(uPreset, q),
+        fieldByIndex(uMorphTarget, q),
+        smootherstep(uMorphAmount)
+      );
+    }
+    return fieldByIndex(uPreset, q);
   }
 
   float bonnetBand(float phase, float width) {
@@ -1403,99 +1407,11 @@ ${liveDeveloperDomainBlock()}
       float shell =
         sin(q.x * 1.7 + q.y * 1.1 - q.z * 1.4 + uTime * 0.18) *
         sin(q.y * 1.3 + q.z * 0.9 + uDevBonnetParameter * 6.2831853);
-      base -= uDevOffsetDistance + shell * uDevCausticStrength * 0.055;
-    }
-    return base;
-  }
-
-  bool raySphere`;
-}
-
-function liveMorphedFieldBlock(morphPath: MorphPath, presetField: string, targetField: string) {
-  const selectedField =
-    morphPath === 'A to B pulse'
-      ? `mix(${presetField}(q), ${targetField}(q), smootherstep(uMorphAmount))`
-      : `${presetField}(q)`;
-
-  return /* glsl */ `
-${liveDeveloperDomainBlock()}
-  float selectedDeveloperBaseField(vec3 q) {
-    return ${selectedField};
-  }
-
-  float bonnetBand(float phase, float width) {
-    float crest = 0.5 + 0.5 * cos(phase);
-    return smoothstep(1.0 - clamp(width * 4.8, 0.045, 0.82), 1.0, crest);
-  }
-
-  vec3 bonnetWeaveBands(vec3 q) {
-    float density = mix(3.4, 6.7, clamp(uDevBonnetParameter, 0.0, 1.0));
-    float globalPhase = uDevStripPhase * 6.2831853;
-    float phaseA = dot(q, normalize(vec3(0.84, 0.32, -0.44))) * density + globalPhase;
-    float phaseB = dot(q, normalize(vec3(-0.38, 0.78, 0.49))) * (density * 0.92) - globalPhase + uDevBonnetParameter * 6.2831853;
-    float bandA = bonnetBand(phaseA, uDevStripWidth);
-    float bandB = bonnetBand(phaseB, uDevStripWidth);
-    float crossing = bandA * bandB;
-    float over = 0.5 + 0.5 * sin(phaseA - phaseB + uDevBonnetParameter * 6.2831853);
-    return vec3(bandA, bandB, crossing * (over * 2.0 - 1.0));
-  }
-
-  float bonnetStripRelief(vec3 q) {
-    if (uDeveloperMode != 1) {
-      return 0.0;
-    }
-
-    if (uDevBonnetMode == 2) {
-      float phase =
-        q.x * 0.7 +
-        q.y * 0.42 -
-        q.z * 0.55 +
-        uDevStripPhase * 6.2831853 +
-        uDevBonnetParameter * 3.1415926;
-      float band = bonnetBand(phase * 6.0, uDevStripWidth);
-      return (band - 0.32) * uDevStripWidth * 0.26;
-    }
-
-    if (uDevBonnetMode == 3) {
-      vec3 bands = bonnetWeaveBands(q);
-      float coverage = max(bands.x, bands.y);
-      float crossing = bands.x * bands.y;
-      return (
-        coverage * 0.28 -
-        (1.0 - coverage) * 0.045 +
-        crossing * bands.z * 0.16
-      ) * uDevStripWidth;
-    }
-
-    return 0.0;
-  }
-
-  float morphedBaseValue(vec3 q) {
-    float base = selectedDeveloperBaseField(q);
-    if (uDeveloperMode == 1 && uDevBonnetMode == 1) {
-      float t = smootherstep(uDevBonnetParameter);
-      float pField = schwarzP(q);
-      float gField = gyroid(q);
-      float dField = diamond(q);
-      base = t < 0.5
-        ? mix(pField, gField, smootherstep(t * 2.0))
-        : mix(gField, dField, smootherstep((t - 0.5) * 2.0));
-    }
-    base += bonnetStripRelief(q);
-    return base;
-  }
-
-  float morphedField(vec3 p) {
-    vec3 q = developerDomain(p) * uFrequency;
-    float base = morphedBaseValue(q) - uIsoLevel;
-    base += developerScrewRelief(p);
-    if (uDeveloperMode == 1 && uDevParallelMode == 1) {
-      base -= uDevOffsetDistance;
-    } else if (uDeveloperMode == 1 && uDevParallelMode == 3) {
-      float shell =
-        sin(q.x * 1.7 + q.y * 1.1 - q.z * 1.4 + uTime * 0.18) *
-        sin(q.y * 1.3 + q.z * 0.9 + uDevBonnetParameter * 6.2831853);
-      base -= uDevOffsetDistance + shell * uDevCausticStrength * 0.055;
+      float pointThreshold = clamp(uDevPointinessClamp, 0.05, 0.95);
+      float pointFocus = smoothstep(pointThreshold, 1.0, abs(shell));
+      base -=
+        uDevOffsetDistance +
+        sign(shell) * pointFocus * uDevCausticStrength * 0.075;
     }
     return base;
   }
@@ -1516,10 +1432,17 @@ function liveDeveloperColorBlock() {
     }
 
     float radius = length(position) / max(0.001, uCropRadius);
-    float pseudoCurvature = abs(sin(position.x * 3.7 + position.y * 2.3 - position.z * 2.9));
+    float diagnosticScale = clamp(0.006 / max(0.001, uDevFiniteDifferenceEpsilon), 0.35, 3.0);
+    float pseudoCurvature = abs(sin(
+      (position.x * 3.7 + position.y * 2.3 - position.z * 2.9) * diagnosticScale
+    ));
     pseudoCurvature *= 0.55 + 0.45 * abs(dot(normal, normalize(position + vec3(0.17, -0.11, 0.23))));
-    float principalBands = 0.5 + 0.5 * sin((position.x * normal.y - position.y * normal.x + position.z * 0.23) * 42.0);
-    float asymptoticBands = 0.5 + 0.5 * sin((position.x + position.y - position.z + dot(normal, vec3(0.7, -0.2, 0.4))) * 34.0);
+    float principalBands = 0.5 + 0.5 * sin(
+      (position.x * normal.y - position.y * normal.x + position.z * 0.23) * 42.0 * diagnosticScale
+    );
+    float asymptoticBands = 0.5 + 0.5 * sin(
+      (position.x + position.y - position.z + dot(normal, vec3(0.7, -0.2, 0.4))) * 34.0 * diagnosticScale
+    );
 
     vec3 devColor = color;
     if (uDevGeometryOverlay == 1) {
@@ -1568,8 +1491,10 @@ function liveDeveloperColorBlock() {
 
     if (uDevParallelMode == 2 || uDevParallelMode == 3) {
       float causticPhase = 0.5 + 0.5 * sin(position.x * 9.0 - position.y * 6.0 + position.z * 7.0);
+      float pointThreshold = clamp(uDevPointinessClamp, 0.05, 0.95);
+      float pointFocus = smoothstep(pointThreshold, 1.0, abs(causticPhase * 2.0 - 1.0));
       vec3 caustic = mix(vec3(0.08, 0.85, 1.0), vec3(1.0, 0.95, 0.38), causticPhase);
-      devColor = mix(devColor, caustic, uDevCausticStrength * (0.25 + causticPhase * 0.45));
+      devColor = mix(devColor, caustic, uDevCausticStrength * (0.16 + pointFocus * 0.62));
     }
 
     return mix(color, devColor, clamp(uDevOverlayStrength, 0.0, 1.0));

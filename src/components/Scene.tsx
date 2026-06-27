@@ -209,8 +209,6 @@ export function Scene() {
   const defaultRenderMode = 'GPU continuous raymarch';
   const [controlPage, setControlPage] = useState<ControlPage>('main');
   const [developerActive, setDeveloperActive] = useState(false);
-  const [developerPrepared, setDeveloperPrepared] = useState(false);
-  const [developerOverlaysMounted, setDeveloperOverlaysMounted] = useState(false);
   const whenMain = () => controlPage === 'main';
   const whenSurface = (get: LevaGet) => whenMain() && get('Visualization Mode') === 'Surface Mode';
   const whenSurfaceGpu = (get: LevaGet) =>
@@ -222,21 +220,18 @@ export function Scene() {
     whenKnot(get) && get('Knot Relationship Type') !== 'Knot-Bounded Minimal Film';
   const whenKnotType = (type: KnotRelationshipType) => (get: LevaGet) =>
     whenKnot(get) && get('Knot Relationship Type') === type;
-  const developerLabLabel = developerActive
-    ? 'Developer Lab active ->'
-    : 'Developer Lab ->';
-  const developerToggleLabel = developerActive
-    ? 'Disable live developer geometry'
-    : 'Enable live developer geometry';
   const [controls, setControls] = useControls(
     () => ({
       ...(controlPage === 'main'
         ? {
-            [developerLabLabel]: button(() => setControlPage('developer')),
+            'Developer Lab ->': button(() => {
+              setDeveloperActive(true);
+              setControlPage('developer');
+            }),
           }
         : {
             '<- Main controls': button(() => setControlPage('main')),
-            [developerToggleLabel]: button(() => setDeveloperActive((active) => !active)),
+            'Toggle live developer geometry': button(() => setDeveloperActive((active) => !active)),
           }),
       'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions, render: whenMain },
       'Render mode': { value: defaultRenderMode, options: renderModeOptions, render: whenSurface },
@@ -329,7 +324,7 @@ export function Scene() {
       ? { 'Differential Geometry / Ribbon Lab': developerLabControls }
       : {}),
     }),
-    [controlPage, defaultRaySteps, defaultRenderMode, developerActive, developerLabLabel, developerToggleLabel, isOpera],
+    [controlPage, defaultRaySteps, defaultRenderMode, isOpera],
   );
 
   const [autoMorph, setAutoMorph] = useState(0);
@@ -351,24 +346,10 @@ export function Scene() {
     }
   }, [controls, defaultRaySteps, isOpera, setControls]);
 
-  const developerRuntimeEnabled = developerActive && developerPrepared;
-  const developerShaderMode = developerActive ? 'live' : 'off';
-  const visualizationMode = controls['Visualization Mode'];
+  const developerRuntimeEnabled = developerActive;
   const effectiveRaySteps = isOpera
     ? Math.min(controls['GPU ray steps'], defaultRaySteps)
     : controls['GPU ray steps'];
-
-  useEffect(() => {
-    const resetTimer = window.setTimeout(() => setDeveloperOverlaysMounted(false), 0);
-    const mountTimer =
-      developerPrepared && visualizationMode === 'Surface Mode'
-        ? window.setTimeout(() => setDeveloperOverlaysMounted(true), 160)
-        : undefined;
-    return () => {
-      window.clearTimeout(resetTimer);
-      if (mountTimer !== undefined) window.clearTimeout(mountTimer);
-    };
-  }, [developerPrepared, visualizationMode]);
 
   useEffect(() => {
     if (!controls['Animate morph'] || controls['Morph path'] === 'No morph') {
@@ -444,21 +425,44 @@ export function Scene() {
           : 0.5 + 0.5 * Math.sin(autoKnotMorph * Math.PI * 2)
         : controls['Knot morph amount'];
 
+  const surfacePreset = controls['Surface preset'];
+  const morphTarget = controls['Morph target'];
+  const morphPath = controls['Morph path'];
+  const isoLevel = controls['Iso-level / threshold'];
+  const resolution = controls['Resolution'];
+  const surfaceScale = controls['Scale'];
+  const frequency = controls['Number of periods / spatial frequency'];
+  const cropRadius = controls['Spherical crop radius'];
+  const cropSoftness = controls['Crop softness'];
+  const shellThickness = controls['Visual shell thickness'];
+
   const settings = useMemo(
     () => ({
-      preset: controls['Surface preset'],
-      morphTarget: controls['Morph target'],
-      morphPath: controls['Morph path'],
+      preset: surfacePreset,
+      morphTarget,
+      morphPath,
       morphAmount: effectiveMorphAmount,
-      isoLevel: controls['Iso-level / threshold'],
-      resolution: controls['Resolution'],
-      scale: controls['Scale'],
-      frequency: controls['Number of periods / spatial frequency'],
-      cropRadius: controls['Spherical crop radius'],
-      cropSoftness: controls['Crop softness'],
-      shellThickness: controls['Visual shell thickness'],
+      isoLevel,
+      resolution,
+      scale: surfaceScale,
+      frequency,
+      cropRadius,
+      cropSoftness,
+      shellThickness,
     }),
-    [controls, effectiveMorphAmount],
+    [
+      cropRadius,
+      cropSoftness,
+      effectiveMorphAmount,
+      frequency,
+      isoLevel,
+      morphPath,
+      morphTarget,
+      resolution,
+      shellThickness,
+      surfacePreset,
+      surfaceScale,
+    ],
   );
 
   const developerSettings = useMemo<DeveloperOverlaySettings>(
@@ -505,7 +509,7 @@ export function Scene() {
   const developerRaymarchSettings = useMemo<DeveloperRaymarchSettings>(
     () => ({
       enabled: developerRuntimeEnabled && controls['Visualization Mode'] === 'Surface Mode',
-      shaderMode: developerShaderMode,
+      shaderMode: 'live',
       geometryOverlay: geometryOverlayIndex[developerSettings.geometryOverlay],
       overlayStrength: developerSettings.overlayStrength,
       finiteDifferenceEpsilon: developerSettings.finiteDifferenceEpsilon,
@@ -526,7 +530,7 @@ export function Scene() {
       screwSharpness: developerSettings.screwSharpness,
       minimalityDiagnostic: developerSettings.minimalityDiagnostic,
     }),
-    [controls, developerRuntimeEnabled, developerSettings, developerShaderMode],
+    [controls, developerRuntimeEnabled, developerSettings],
   );
 
   return (
@@ -608,8 +612,6 @@ export function Scene() {
               complementSolid={controls['Complement solid']}
               complementSide={controls['Complement side']}
               developer={developerRaymarchSettings}
-              prepareDeveloper={controlPage === 'developer'}
-              onDeveloperReadyChange={setDeveloperPrepared}
             />
           ) : (
             <SurfaceMesh
@@ -625,7 +627,7 @@ export function Scene() {
               twist={controls['Psychedelic twist']}
             />
           )}
-          {developerPrepared && developerOverlaysMounted && controls['Visualization Mode'] === 'Surface Mode' && (
+          {controls['Visualization Mode'] === 'Surface Mode' && (
             <DeveloperOverlays
               settings={settings}
               developer={developerSettings}
@@ -636,7 +638,7 @@ export function Scene() {
         <OrbitControls enableDamping dampingFactor={0.08} minDistance={2.4} maxDistance={10} />
       </Canvas>
       <div className="title-plate">
-        <span>TPMS visual instrument</span>
+        <span>{developerActive ? 'TPMS visual instrument / developer geometry live' : 'TPMS visual instrument'}</span>
         <strong>Gyroid Minimal Surface Visualizer</strong>
       </div>
     </div>

@@ -37,6 +37,7 @@ export type ScrewPhaseOptions = {
   turns?: number;
   pinch?: number;
   sharpness?: number;
+  phase?: number;
 };
 
 // Smooth coordinate-domain vortex deformation. It avoids direct angular phase
@@ -54,56 +55,90 @@ export function applyScrewPhase(p: THREE.Vector3, options?: ScrewPhaseOptions) {
     return q;
   }
   const sharpness = Math.max(1, options.sharpness ?? 3.2);
-  const defects = screwDefects(options.mode, core);
+  const phase = (options.phase ?? 0) * Math.PI * 2;
 
-  for (const defect of defects) {
-    const dx = q.x - defect.x;
-    const dy = q.y - defect.y;
-    const r = Math.hypot(dx, dy);
-    const normalized = r / core;
-    const focus = Math.exp(-Math.pow(normalized, sharpness));
-    const helixPhase = q.z * turns * Math.PI * 2 + defect.phase;
-    const helicalMix =
-      options.mode === 'Helical Corkscrew' || options.mode === 'Spiral Pinch' || options.mode === 'Thorn Crown'
-        ? 0.55 + 0.45 * Math.sin(helixPhase)
-        : 1;
-    const angle = defect.sign * options.strength * focus * (1.15 + helicalMix);
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const rx = cos * dx - sin * dy;
-    const ry = sin * dx + cos * dy;
-    const pinchWave = 0.65 + 0.35 * Math.cos(helixPhase);
-    const pinchGain = options.mode === 'Spiral Pinch' || options.mode === 'Thorn Crown' ? 0.62 : 0.22;
-    const radialScale = Math.max(0.06, 1 - pinch * focus * pinchGain * pinchWave);
-    q.x = defect.x + rx * radialScale;
-    q.y = defect.y + ry * radialScale;
-    q.z += defect.sign * options.strength * focus * 0.08 * Math.sin(helixPhase) + pinch * focus * 0.06 * Math.cos(helixPhase);
+  if (options.mode === 'Paired Defects') {
+    applyLocalScrew(q, options, core, turns, pinch, sharpness, -core, 0, 1, phase);
+    applyLocalScrew(q, options, core, turns, pinch, sharpness, core, 0, -1, phase + Math.PI);
+  } else if (options.mode === 'Thorn Crown') {
+    applyCrownScrew(q, options, core, turns, pinch, sharpness, phase);
+  } else {
+    applyLocalScrew(q, options, core, turns, pinch, sharpness, 0, 0, 1, phase);
   }
 
   return q;
 }
 
-function screwDefects(mode: ScrewPhaseOptions['mode'], core: number) {
-  if (mode === 'Paired Defects') {
-    return [
-      { x: -core, y: 0, sign: 1, phase: 0 },
-      { x: core, y: 0, sign: -1, phase: Math.PI },
-    ];
-  }
+function applyLocalScrew(
+  q: THREE.Vector3,
+  options: ScrewPhaseOptions,
+  core: number,
+  turns: number,
+  pinch: number,
+  sharpness: number,
+  centerX: number,
+  centerY: number,
+  sign: number,
+  phaseOffset: number,
+) {
+  const dx = q.x - centerX;
+  const dy = q.y - centerY;
+  const r = Math.hypot(dx, dy);
+  const focus = Math.exp(-Math.pow(r / core, sharpness));
+  const helixPhase = q.z * turns * Math.PI * 2 + phaseOffset;
+  const helical = options.mode === 'Helical Corkscrew' || options.mode === 'Spiral Pinch';
+  const helicalMix = helical ? 0.55 + 0.45 * Math.sin(helixPhase) : 1;
+  const angle = sign * options.strength * focus * (1.15 + helicalMix);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const pinchWave = 0.65 + 0.35 * Math.cos(helixPhase);
+  const pinchGain = options.mode === 'Spiral Pinch' ? 0.62 : 0.22;
+  const radialScale = Math.max(0.06, 1 - pinch * focus * pinchGain * pinchWave);
+  q.x = centerX + (cos * dx - sin * dy) * radialScale;
+  q.y = centerY + (sin * dx + cos * dy) * radialScale;
+  q.z += sign * options.strength * focus * 0.08 * Math.sin(helixPhase) + pinch * focus * 0.06 * Math.cos(helixPhase);
+}
 
-  if (mode === 'Thorn Crown') {
-    return Array.from({ length: 6 }, (_, index) => {
-      const angle = (index / 6) * Math.PI * 2;
-      return {
-        x: Math.cos(angle) * core * 1.25,
-        y: Math.sin(angle) * core * 1.25,
-        sign: index % 2 === 0 ? 1 : -1,
-        phase: angle,
-      };
-    });
-  }
+function applyCrownScrew(
+  q: THREE.Vector3,
+  options: ScrewPhaseOptions,
+  core: number,
+  turns: number,
+  pinch: number,
+  sharpness: number,
+  phaseOffset: number,
+) {
+  const r = Math.hypot(q.x, q.y);
+  const ux = q.x / Math.max(r, 1e-7);
+  const uy = q.y / Math.max(r, 1e-7);
+  const squaredX = ux * ux - uy * uy;
+  const squaredY = 2 * ux * uy;
+  const cubedX = squaredX * ux - squaredY * uy;
+  const cubedY = squaredX * uy + squaredY * ux;
+  const harmonicX = cubedX * cubedX - cubedY * cubedY;
+  const harmonicY = 2 * cubedX * cubedY;
+  const phase = q.z * turns * Math.PI * 2 + phaseOffset;
+  const spiral = harmonicX * Math.cos(phase) + harmonicY * Math.sin(phase);
+  const ringCoordinate = Math.abs(r - core * 1.25) / Math.max(0.08, core * 0.58);
+  const centerFade = smoothstep(0, Math.max(0.04, core * 0.18), r);
+  const focus = Math.exp(-Math.pow(ringCoordinate, sharpness)) * centerFade;
+  const angle = options.strength * focus * (1.05 + 0.72 * spiral);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const radialScale = Math.max(0.08, 1 - pinch * focus * 0.48 * (0.72 + 0.28 * spiral));
+  const x = q.x;
+  const y = q.y;
+  q.x = (cos * x - sin * y) * radialScale;
+  q.y = (sin * x + cos * y) * radialScale;
+  q.z += focus * (
+    options.strength * 0.07 * spiral +
+    pinch * 0.055 * (-harmonicX * Math.sin(phase) + harmonicY * Math.cos(phase))
+  );
+}
 
-  return [{ x: 0, y: 0, sign: 1, phase: 0 }];
+function smoothstep(edge0: number, edge1: number, value: number) {
+  const t = THREE.MathUtils.clamp((value - edge0) / Math.max(1e-7, edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 export function evaluateSurfaceJet(value: SurfaceValue, p: THREE.Vector3, epsilon: number): SurfaceJet {

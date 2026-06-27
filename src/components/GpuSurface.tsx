@@ -1,6 +1,5 @@
 import { useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import * as THREE from 'three';
+import { useEffect, useMemo, useRef } from 'react';
 import type { SurfaceSettings } from '../rendering/geometryCache';
 import { createRaymarchMaterial, updateRaymarchMaterial } from '../rendering/raymarchMaterial';
 import type { ComplementSide, DeveloperRaymarchSettings } from '../rendering/raymarchMaterial';
@@ -19,8 +18,6 @@ interface GpuSurfaceProps {
   complementSolid: boolean;
   complementSide: ComplementSide;
   developer: DeveloperRaymarchSettings;
-  prepareDeveloper: boolean;
-  onDeveloperReadyChange: (ready: boolean) => void;
 }
 
 export function GpuSurface({
@@ -36,39 +33,27 @@ export function GpuSurface({
   complementSolid,
   complementSide,
   developer,
-  prepareDeveloper,
-  onDeveloperReadyChange,
 }: GpuSurfaceProps) {
-  const shaderIdentity = useMemo(
-    () => ({
-      preset: settings.preset,
-      morphTarget: settings.morphTarget,
-      morphPath: settings.morphPath,
-    }),
-    [settings.morphPath, settings.morphTarget, settings.preset],
+  const material = useMemo(
+    () =>
+      createRaymarchMaterial({
+        preset: 'Gyroid',
+        morphTarget: 'Diamond',
+        morphPath: 'No morph',
+        developerShaderMode: 'live',
+      }),
+    [],
   );
-  const leanMaterial = useMemo(
-    () => createRaymarchMaterial({ ...shaderIdentity, developerShaderMode: 'off' }),
-    [shaderIdentity],
-  );
-  const liveMaterial = useMemo(
-    () => createRaymarchMaterial({ ...shaderIdentity, developerShaderMode: 'live' }),
-    [shaderIdentity],
-  );
-  const [preparedMaterial, setPreparedMaterial] = useState<THREE.ShaderMaterial | null>(null);
-  const [contextAvailable, setContextAvailable] = useState(true);
   const warmupFrames = useRef(0);
   const adaptiveScale = useRef(1);
   const slowFrames = useRef(0);
   const fastFrames = useRef(0);
+  const developerWasEnabled = useRef(false);
+  const contextLost = useRef(false);
   const { camera, gl } = useThree();
-  const liveRequested = developer.shaderMode === 'live';
-  const shouldPrepareDeveloper = prepareDeveloper || liveRequested;
-  const liveReady = contextAvailable && preparedMaterial === liveMaterial;
-  const material = liveRequested && liveReady ? liveMaterial : leanMaterial;
 
   useEffect(() => {
-    const updateOptions = {
+    updateRaymarchMaterial(material, {
       settings,
       colorMode,
       raySteps,
@@ -81,12 +66,7 @@ export function GpuSurface({
       complementSolid,
       complementSide,
       developer,
-    };
-    updateRaymarchMaterial(leanMaterial, {
-      ...updateOptions,
-      developer: { ...developer, enabled: false, shaderMode: 'off' },
     });
-    updateRaymarchMaterial(liveMaterial, updateOptions);
   }, [
     autoRotationSpeed,
     breathing,
@@ -94,8 +74,7 @@ export function GpuSurface({
     complementSolid,
     complementSide,
     developer,
-    leanMaterial,
-    liveMaterial,
+    material,
     raySteps,
     settings,
     twist,
@@ -105,80 +84,42 @@ export function GpuSurface({
   ]);
 
   useEffect(() => {
-    if (!shouldPrepareDeveloper || liveReady || !contextAvailable) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    let geometry: THREE.SphereGeometry | null = null;
-    const timer = window.setTimeout(() => {
-      geometry = new THREE.SphereGeometry(1, 8, 6);
-      const compileScene = new THREE.Scene();
-      compileScene.add(new THREE.Mesh(geometry, liveMaterial));
-
-      void gl
-        .compileAsync(compileScene, camera)
-        .then(() => {
-          if (!cancelled) {
-            setPreparedMaterial(liveMaterial);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setPreparedMaterial(null);
-          }
-        })
-        .finally(() => geometry?.dispose());
-    }, 90);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-      geometry?.dispose();
-    };
-  }, [camera, contextAvailable, gl, liveMaterial, liveReady, shouldPrepareDeveloper]);
-
-  useEffect(() => {
-    onDeveloperReadyChange(liveReady);
-  }, [liveReady, onDeveloperReadyChange]);
-
-  useEffect(() => {
-    warmupFrames.current = 0;
-    slowFrames.current = 0;
-    fastFrames.current = 0;
-  }, [material]);
-
-  useEffect(() => {
     const canvas = gl.domElement;
     const handleContextLost = (event: Event) => {
       event.preventDefault();
-      setContextAvailable(false);
-      setPreparedMaterial(null);
+      contextLost.current = true;
+      material.uniforms.uDeveloperMode.value = 0;
     };
-    const handleContextRestored = () => setContextAvailable(true);
+    const handleContextRestored = () => {
+      contextLost.current = false;
+      warmupFrames.current = 0;
+      adaptiveScale.current = 0.7;
+    };
     canvas.addEventListener('webglcontextlost', handleContextLost, false);
     canvas.addEventListener('webglcontextrestored', handleContextRestored, false);
     return () => {
       canvas.removeEventListener('webglcontextlost', handleContextLost, false);
       canvas.removeEventListener('webglcontextrestored', handleContextRestored, false);
     };
-  }, [gl]);
+  }, [gl, material]);
 
-  useEffect(
-    () => () => {
-      leanMaterial.dispose();
-      liveMaterial.dispose();
-    },
-    [leanMaterial, liveMaterial],
-  );
+  useEffect(() => () => material.dispose(), [material]);
 
   useFrame((state, delta) => {
-    leanMaterial.uniforms.uTime.value = state.clock.elapsedTime;
-    leanMaterial.uniforms.uCameraPosition.value.copy(camera.position);
-    liveMaterial.uniforms.uTime.value = state.clock.elapsedTime;
-    liveMaterial.uniforms.uCameraPosition.value.copy(camera.position);
+    material.uniforms.uTime.value = state.clock.elapsedTime;
+    material.uniforms.uCameraPosition.value.copy(camera.position);
+    material.uniforms.uDeveloperMode.value = developer.enabled && !contextLost.current ? 1 : 0;
 
-    if (material !== liveMaterial) {
+    if (developer.enabled !== developerWasEnabled.current) {
+      developerWasEnabled.current = developer.enabled;
+      warmupFrames.current = 0;
+      slowFrames.current = 0;
+      fastFrames.current = 0;
+      if (!developer.enabled) adaptiveScale.current = 1;
+    }
+
+    if (!developer.enabled) {
+      material.uniforms.uRaySteps.value = raySteps;
       return;
     }
 
@@ -202,15 +143,17 @@ export function GpuSurface({
       fastFrames.current = 0;
     }
 
-    const warmup = 0.36 + 0.64 * (warmupFrames.current / 48);
+    const warmup = 0.42 + 0.58 * (warmupFrames.current / 48);
     const scale = Math.min(warmup, adaptiveScale.current);
-    const adaptiveSteps = Math.min(raySteps, Math.max(64, Math.round((raySteps * scale) / 8) * 8));
-    liveMaterial.uniforms.uRaySteps.value = adaptiveSteps;
+    material.uniforms.uRaySteps.value = Math.min(
+      raySteps,
+      Math.max(64, Math.round((raySteps * scale) / 8) * 8),
+    );
   });
 
   return (
     <mesh material={material}>
-      <sphereGeometry args={[settings.cropRadius, 128, 64]} />
+      <sphereGeometry args={[settings.cropRadius, 96, 48]} />
     </mesh>
   );
 }
