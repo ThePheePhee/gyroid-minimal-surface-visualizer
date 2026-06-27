@@ -54,9 +54,11 @@ export interface DeveloperOverlaySettings {
 export function DeveloperOverlays({
   settings,
   developer,
+  visible,
 }: {
   settings: SurfaceSettings;
   developer: DeveloperOverlaySettings;
+  visible: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const { camera } = useThree();
@@ -223,7 +225,7 @@ export function DeveloperOverlays({
   });
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} visible={visible}>
       {ribbonGeometry && <mesh geometry={ribbonGeometry} material={ribbonMaterial} renderOrder={40} />}
       {stripGeometry && <mesh geometry={stripGeometry} material={stripMaterial} renderOrder={41} />}
       {skeletonGeometry && developer.labyrinthSkeleton === 'Distance Ridge Points' && (

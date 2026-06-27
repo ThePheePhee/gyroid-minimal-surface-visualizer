@@ -1174,31 +1174,14 @@ function cycleMorphedFieldBlock() {
 
 function liveDeveloperDomainBlock() {
   return /* glsl */ `
-  vec2 screwDefectCenter(int index, float core) {
-    if (uDevScrewMode == 2) {
-      return index == 0 ? vec2(-core, 0.0) : vec2(core, 0.0);
-    }
-    if (uDevScrewMode == 5) {
-      float angle = 6.2831853 * float(index) / 6.0 + uDevStripPhase * 6.2831853;
-      return vec2(cos(angle), sin(angle)) * core * 1.25;
-    }
-    return vec2(0.0);
+  vec2 complexMultiply(vec2 a, vec2 b) {
+    return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
   }
 
-  float screwDefectSign(int index) {
-    if (uDevScrewMode == 2) {
-      return index == 0 ? 1.0 : -1.0;
-    }
-    if (uDevScrewMode == 5) {
-      return mod(float(index), 2.0) < 0.5 ? 1.0 : -1.0;
-    }
-    return 1.0;
-  }
-
-  int screwDefectCount() {
-    if (uDevScrewMode == 2) return 2;
-    if (uDevScrewMode == 5) return 6;
-    return 1;
+  vec2 sixthHarmonic(vec2 unitDirection) {
+    vec2 squared = complexMultiply(unitDirection, unitDirection);
+    vec2 cubed = complexMultiply(squared, unitDirection);
+    return complexMultiply(cubed, cubed);
   }
 
   float screwFocus(float r, float core) {
@@ -1206,9 +1189,7 @@ function liveDeveloperDomainBlock() {
     return exp(-pow(max(r / max(core, 0.001), 0.0), sharpness));
   }
 
-  vec3 applySmoothScrewDefect(vec3 p, int index, float core) {
-    vec2 center = screwDefectCenter(index, core);
-    float sign = screwDefectSign(index);
+  vec3 applySmoothScrewDefect(vec3 p, vec2 center, float defectSign, float phaseOffset, float core) {
     vec2 delta = p.xy - center;
     float r = length(delta);
     float focus = screwFocus(r, core);
@@ -1216,18 +1197,45 @@ function liveDeveloperDomainBlock() {
     float helicalPhase =
       p.z * turns * 6.2831853 +
       uDevStripPhase * 6.2831853 +
-      float(index) * 1.2566371;
+      phaseOffset;
     bool helicalMode = uDevScrewMode == 3 || uDevScrewMode == 4 || uDevScrewMode == 5;
     float helicalMix = helicalMode ? 0.55 + 0.45 * sin(helicalPhase) : 1.0;
-    float angle = sign * uDevScrewStrength * focus * (1.15 + helicalMix);
+    float angle = defectSign * uDevScrewStrength * focus * (1.15 + helicalMix);
     vec2 rotated = rotate2d(angle) * delta;
     float pinchWave = 0.65 + 0.35 * cos(helicalPhase);
     float pinchGain = (uDevScrewMode == 4 || uDevScrewMode == 5) ? 0.62 : 0.22;
     float radialScale = max(0.06, 1.0 - uDevScrewPinch * focus * pinchGain * pinchWave);
     p.xy = center + rotated * radialScale;
     p.z +=
-      sign * uDevScrewStrength * focus * 0.08 * sin(helicalPhase) +
+      defectSign * uDevScrewStrength * focus * 0.08 * sin(helicalPhase) +
       uDevScrewPinch * focus * 0.06 * cos(helicalPhase);
+    return p;
+  }
+
+  vec3 applySmoothCrownScrew(vec3 p, float core) {
+    float r = length(p.xy);
+    vec2 direction = p.xy / max(r, 0.0001);
+    vec2 harmonic = sixthHarmonic(direction);
+    float phase =
+      p.z * max(0.05, uDevScrewTurns) * 6.2831853 +
+      uDevStripPhase * 6.2831853;
+    float spiral = dot(harmonic, vec2(cos(phase), sin(phase)));
+    float ringRadius = core * 1.25;
+    float ringWidth = max(0.08, core * 0.58);
+    float ringCoordinate = abs(r - ringRadius) / ringWidth;
+    float focus =
+      exp(-pow(ringCoordinate, clamp(uDevScrewSharpness, 1.0, 8.0))) *
+      smoothstep(0.0, max(0.04, core * 0.18), r);
+    float angle = uDevScrewStrength * focus * (1.05 + 0.72 * spiral);
+    float radialScale = max(
+      0.08,
+      1.0 - uDevScrewPinch * focus * 0.48 * (0.72 + 0.28 * spiral)
+    );
+    p.xy = rotate2d(angle) * p.xy * radialScale;
+    p.z += focus * (
+      uDevScrewStrength * 0.07 * spiral +
+      uDevScrewPinch * 0.055 * dot(harmonic, vec2(-sin(phase), cos(phase)))
+    );
     return p;
   }
 
@@ -1239,13 +1247,58 @@ function liveDeveloperDomainBlock() {
       (abs(uDevScrewStrength) > 0.0001 || abs(uDevScrewPinch) > 0.0001)
     ) {
       float core = max(0.05, uDevScrewCoreRadius);
-      int defectCount = screwDefectCount();
-      for (int i = 0; i < 6; i++) {
-        if (i >= defectCount) break;
-        p = applySmoothScrewDefect(p, i, core);
+      if (uDevScrewMode == 2) {
+        p = applySmoothScrewDefect(p, vec2(-core, 0.0), 1.0, 0.0, core);
+        p = applySmoothScrewDefect(p, vec2(core, 0.0), -1.0, 3.1415926, core);
+      } else if (uDevScrewMode == 5) {
+        p = applySmoothCrownScrew(p, core);
+      } else {
+        p = applySmoothScrewDefect(p, vec2(0.0), 1.0, 0.0, core);
       }
     }
     return p;
+  }
+
+  float localScrewRelief(vec3 p, vec2 center, float defectSign, float phaseOffset, float core) {
+    vec2 delta = p.xy - center;
+    float r = length(delta);
+    vec2 direction = delta / max(r, 0.0001);
+    float coreFade = smoothstep(0.0, core * 0.16, r);
+    float focus = screwFocus(r, core) * coreFade;
+    float phase =
+      p.z * max(0.05, uDevScrewTurns) * 6.2831853 +
+      uDevStripPhase * 6.2831853 +
+      phaseOffset;
+    float spiralArm = dot(direction, vec2(cos(phase), sin(phase)));
+    float thorn = pow(
+      max(0.0, 0.5 + 0.5 * spiralArm),
+      clamp(uDevScrewSharpness, 1.0, 8.0)
+    );
+    float modeGain = uDevScrewMode == 4 ? 1.55 : 1.0;
+    return
+      defectSign * focus * spiralArm * abs(uDevScrewStrength) * 0.035 +
+      focus * thorn * uDevScrewPinch * 0.07 * modeGain;
+  }
+
+  float crownScrewRelief(vec3 p, float core) {
+    float r = length(p.xy);
+    vec2 direction = p.xy / max(r, 0.0001);
+    vec2 harmonic = sixthHarmonic(direction);
+    float phase =
+      p.z * max(0.05, uDevScrewTurns) * 6.2831853 +
+      uDevStripPhase * 6.2831853;
+    float spiral = dot(harmonic, vec2(cos(phase), sin(phase)));
+    float ringCoordinate = abs(r - core * 1.25) / max(0.08, core * 0.58);
+    float focus =
+      exp(-pow(ringCoordinate, clamp(uDevScrewSharpness, 1.0, 8.0))) *
+      smoothstep(0.0, max(0.04, core * 0.18), r);
+    float thorn = pow(
+      max(0.0, 0.5 + 0.5 * spiral),
+      clamp(uDevScrewSharpness, 1.0, 8.0)
+    );
+    return
+      focus * spiral * abs(uDevScrewStrength) * 0.045 +
+      focus * thorn * uDevScrewPinch * 0.105;
   }
 
   float developerScrewRelief(vec3 p) {
@@ -1254,30 +1307,15 @@ function liveDeveloperDomainBlock() {
     }
 
     float core = max(0.05, uDevScrewCoreRadius);
-    float turns = max(0.05, uDevScrewTurns);
-    float relief = 0.0;
-    int defectCount = screwDefectCount();
-    for (int i = 0; i < 6; i++) {
-      if (i >= defectCount) break;
-      vec2 center = screwDefectCenter(i, core);
-      float sign = screwDefectSign(i);
-      vec2 delta = p.xy - center;
-      float r = length(delta);
-      vec2 direction = delta / max(r, 0.0001);
-      float coreFade = smoothstep(0.0, core * 0.16, r);
-      float focus = screwFocus(r, core) * coreFade;
-      float phase =
-        p.z * turns * 6.2831853 +
-        uDevStripPhase * 6.2831853 +
-        float(i) * 1.2566371;
-      vec2 helixDirection = vec2(cos(phase), sin(phase));
-      float spiralArm = dot(direction, helixDirection);
-      float thorn = pow(max(0.0, 0.5 + 0.5 * spiralArm), clamp(uDevScrewSharpness, 1.0, 8.0));
-      float modeGain = (uDevScrewMode == 4 || uDevScrewMode == 5) ? 1.55 : 1.0;
-      relief += sign * focus * spiralArm * abs(uDevScrewStrength) * 0.035;
-      relief += focus * thorn * uDevScrewPinch * 0.07 * modeGain;
+    if (uDevScrewMode == 2) {
+      return
+        localScrewRelief(p, vec2(-core, 0.0), 1.0, 0.0, core) +
+        localScrewRelief(p, vec2(core, 0.0), -1.0, 3.1415926, core);
     }
-    return relief;
+    if (uDevScrewMode == 5) {
+      return crownScrewRelief(p, core);
+    }
+    return localScrewRelief(p, vec2(0.0), 1.0, 0.0, core);
   }
 `;
 }

@@ -209,6 +209,8 @@ export function Scene() {
   const defaultRenderMode = 'GPU continuous raymarch';
   const [controlPage, setControlPage] = useState<ControlPage>('main');
   const [developerActive, setDeveloperActive] = useState(false);
+  const [developerPrepared, setDeveloperPrepared] = useState(false);
+  const [developerOverlaysMounted, setDeveloperOverlaysMounted] = useState(false);
   const whenMain = () => controlPage === 'main';
   const whenSurface = (get: LevaGet) => whenMain() && get('Visualization Mode') === 'Surface Mode';
   const whenSurfaceGpu = (get: LevaGet) =>
@@ -349,11 +351,24 @@ export function Scene() {
     }
   }, [controls, defaultRaySteps, isOpera, setControls]);
 
-  const developerRuntimeEnabled = developerActive;
-  const developerShaderMode = developerRuntimeEnabled ? 'live' : 'off';
+  const developerRuntimeEnabled = developerActive && developerPrepared;
+  const developerShaderMode = developerActive ? 'live' : 'off';
+  const visualizationMode = controls['Visualization Mode'];
   const effectiveRaySteps = isOpera
     ? Math.min(controls['GPU ray steps'], defaultRaySteps)
     : controls['GPU ray steps'];
+
+  useEffect(() => {
+    const resetTimer = window.setTimeout(() => setDeveloperOverlaysMounted(false), 0);
+    const mountTimer =
+      developerPrepared && visualizationMode === 'Surface Mode'
+        ? window.setTimeout(() => setDeveloperOverlaysMounted(true), 160)
+        : undefined;
+    return () => {
+      window.clearTimeout(resetTimer);
+      if (mountTimer !== undefined) window.clearTimeout(mountTimer);
+    };
+  }, [developerPrepared, visualizationMode]);
 
   useEffect(() => {
     if (!controls['Animate morph'] || controls['Morph path'] === 'No morph') {
@@ -593,6 +608,8 @@ export function Scene() {
               complementSolid={controls['Complement solid']}
               complementSide={controls['Complement side']}
               developer={developerRaymarchSettings}
+              prepareDeveloper={controlPage === 'developer'}
+              onDeveloperReadyChange={setDeveloperPrepared}
             />
           ) : (
             <SurfaceMesh
@@ -608,8 +625,12 @@ export function Scene() {
               twist={controls['Psychedelic twist']}
             />
           )}
-          {developerRuntimeEnabled && controls['Visualization Mode'] === 'Surface Mode' && (
-            <DeveloperOverlays settings={settings} developer={developerSettings} />
+          {developerPrepared && developerOverlaysMounted && controls['Visualization Mode'] === 'Surface Mode' && (
+            <DeveloperOverlays
+              settings={settings}
+              developer={developerSettings}
+              visible={developerRuntimeEnabled}
+            />
           )}
         </Suspense>
         <OrbitControls enableDamping dampingFactor={0.08} minDistance={2.4} maxDistance={10} />
