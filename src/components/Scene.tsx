@@ -202,10 +202,42 @@ const developerLabControls = folder(
 type LevaGet = (path: string) => unknown;
 type ControlPage = 'main' | 'developer';
 
+function renderDprForBudget(pixelBudget: number, maxDpr: number) {
+  if (typeof window === 'undefined') return 1;
+  const cssPixels = Math.max(1, window.innerWidth * window.innerHeight);
+  const budgetDpr = Math.sqrt(pixelBudget / cssPixels);
+  return THREE.MathUtils.clamp(
+    Math.min(window.devicePixelRatio || 1, maxDpr, budgetDpr),
+    0.4,
+    maxDpr,
+  );
+}
+
+function useRenderDpr(pixelBudget: number, maxDpr: number) {
+  const [dpr, setDpr] = useState(() => renderDprForBudget(pixelBudget, maxDpr));
+  useEffect(() => {
+    let frame = window.requestAnimationFrame(() => {
+      setDpr(renderDprForBudget(pixelBudget, maxDpr));
+    });
+    const handleResize = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        setDpr(renderDprForBudget(pixelBudget, maxDpr));
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [maxDpr, pixelBudget]);
+  return dpr;
+}
+
 export function Scene() {
   const isOpera = typeof navigator !== 'undefined' && /\bOPR\//.test(navigator.userAgent);
   const maxDevicePixelRatio = isOpera ? 1 : 1.25;
-  const defaultRaySteps = isOpera ? 96 : 192;
+  const defaultRaySteps = isOpera ? 96 : 128;
   const defaultRenderMode = 'GPU continuous raymarch';
   const [controlPage, setControlPage] = useState<ControlPage>('main');
   const [developerActive, setDeveloperActive] = useState(false);
@@ -225,8 +257,10 @@ export function Scene() {
       ...(controlPage === 'main'
         ? {
             'Developer Lab ->': button(() => {
-              setDeveloperActive(true);
               setControlPage('developer');
+              window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(() => setDeveloperActive(true));
+              });
             }),
           }
         : {
@@ -235,7 +269,7 @@ export function Scene() {
           }),
       'Visualization Mode': { value: 'Surface Mode', options: visualizationModeOptions, render: whenMain },
       'Render mode': { value: defaultRenderMode, options: renderModeOptions, render: whenSurface },
-      'GPU ray steps': { value: defaultRaySteps, min: 64, max: 384, step: 16, render: whenSurface },
+      'GPU ray steps': { value: defaultRaySteps, min: 64, max: 256, step: 16, render: whenSurface },
       'Surface preset': { value: 'Gyroid' as SurfacePreset, options: presetOptions, render: whenSurface },
       'Morph target': { value: 'Diamond' as SurfacePreset, options: presetOptions, render: whenSurface },
       'Morph path': { value: 'No morph' as MorphPath, options: morphPathOptions, render: whenSurface },
@@ -347,9 +381,18 @@ export function Scene() {
   }, [controls, defaultRaySteps, isOpera, setControls]);
 
   const developerRuntimeEnabled = developerActive;
-  const effectiveRaySteps = isOpera
-    ? Math.min(controls['GPU ray steps'], defaultRaySteps)
-    : controls['GPU ray steps'];
+  const renderPixelBudget = developerRuntimeEnabled || controlPage === 'developer'
+    ? isOpera
+      ? 700_000
+      : 950_000
+    : isOpera
+      ? 1_100_000
+      : 1_600_000;
+  const canvasDpr = useRenderDpr(renderPixelBudget, maxDevicePixelRatio);
+  const effectiveRaySteps = Math.min(
+    controls['GPU ray steps'],
+    isOpera ? defaultRaySteps : 256,
+  );
 
   useEffect(() => {
     if (!controls['Animate morph'] || controls['Morph path'] === 'No morph') {
@@ -537,9 +580,9 @@ export function Scene() {
     <div className="app-shell" data-black={controls['Black background']}>
       <Leva collapsed={false} oneLineLabels />
       <Canvas
-        dpr={[1, maxDevicePixelRatio]}
+        dpr={canvasDpr}
         gl={{
-          antialias: !isOpera,
+          antialias: false,
           outputColorSpace: THREE.SRGBColorSpace,
           powerPreference: 'high-performance',
         }}

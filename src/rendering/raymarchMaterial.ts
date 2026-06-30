@@ -295,7 +295,7 @@ const fragmentShader = /* glsl */ `
   uniform float uDevScrewSharpness;
   uniform int uDevMinimalityDiagnostic;
 
-  const int MAX_STEPS = 384;
+  const int MAX_STEPS = 256;
   const int REFINE_STEPS = 7;
   const float SURFACE_COUNT = 11.0;
 
@@ -993,11 +993,10 @@ const fragmentShader = /* glsl */ `
 `;
 
 function buildFragmentShader(settings: RaymarchShaderSettings) {
-  if (settings.developerShaderMode === 'live') {
-    return buildLiveFragmentShader(fragmentShader, liveUniversalMorphedFieldBlock());
-  }
-
   if (settings.morphPath === 'Cycle all families') {
+    if (settings.developerShaderMode === 'live') {
+      return buildLiveFragmentShader(fragmentShader, liveUniversalMorphedFieldBlock());
+    }
     return buildLeanFragmentShader(fragmentShader, cycleMorphedFieldBlock());
   }
 
@@ -1131,6 +1130,13 @@ function buildFragmentShader(settings: RaymarchShaderSettings) {
   const shader = fragmentShader
     .replace(/ {2}float gyroid\(vec3 p\) \{[\s\S]*? {2}vec3 animatedDomain/, fieldSection)
     .replace(/ {2}float morphedBaseValue\(vec3 q\) \{[\s\S]*? {2}bool raySphere/, morphedBaseValue);
+
+  if (settings.developerShaderMode === 'live') {
+    return buildLiveFragmentShader(
+      shader,
+      liveSpecializedMorphedFieldBlock(settings.morphPath, presetField, targetField),
+    );
+  }
 
   const leanMorphedField =
     settings.morphPath === 'A to B pulse'
@@ -1315,9 +1321,7 @@ function liveDeveloperDomainBlock() {
 }
 
 function liveUniversalMorphedFieldBlock() {
-  return /* glsl */ `
-${liveDeveloperDomainBlock()}
-  float selectedDeveloperBaseField(vec3 q) {
+  return liveMorphedFieldBlock(/* glsl */ `
     if (uMorphPath == 2) {
       float scaled = fract(uMorphAmount) * SURFACE_COUNT;
       int fromIndex = int(floor(scaled));
@@ -1333,6 +1337,26 @@ ${liveDeveloperDomainBlock()}
       );
     }
     return fieldByIndex(uPreset, q);
+  `);
+}
+
+function liveSpecializedMorphedFieldBlock(
+  morphPath: MorphPath,
+  presetField: string,
+  targetField: string,
+) {
+  const selectedField =
+    morphPath === 'A to B pulse'
+      ? `mix(${presetField}(q), ${targetField}(q), smootherstep(uMorphAmount))`
+      : `${presetField}(q)`;
+  return liveMorphedFieldBlock(`return ${selectedField};`);
+}
+
+function liveMorphedFieldBlock(selectedFieldBody: string) {
+  return /* glsl */ `
+${liveDeveloperDomainBlock()}
+  float selectedDeveloperBaseField(vec3 q) {
+    ${selectedFieldBody}
   }
 
   float bonnetBand(float phase, float width) {
@@ -1541,7 +1565,7 @@ export function createRaymarchMaterial(settings: RaymarchShaderSettings) {
     vertexShader,
     fragmentShader: buildFragmentShader(settings),
     side: THREE.FrontSide,
-    transparent: true,
+    transparent: false,
     depthWrite: true,
     uniforms: {
       uCameraPosition: { value: new THREE.Vector3() },

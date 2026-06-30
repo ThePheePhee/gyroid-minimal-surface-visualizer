@@ -37,12 +37,12 @@ export function GpuSurface({
   const material = useMemo(
     () =>
       createRaymarchMaterial({
-        preset: 'Gyroid',
-        morphTarget: 'Diamond',
-        morphPath: 'No morph',
+        preset: settings.preset,
+        morphTarget: settings.morphTarget,
+        morphPath: settings.morphPath,
         developerShaderMode: 'live',
       }),
-    [],
+    [settings.morphPath, settings.morphTarget, settings.preset],
   );
   const warmupFrames = useRef(0);
   const adaptiveScale = useRef(1);
@@ -124,11 +124,15 @@ export function GpuSurface({
     }
 
     warmupFrames.current = Math.min(48, warmupFrames.current + 1);
-    if (delta < 0.15 && delta > 1 / 25) {
+    if (delta >= 0.15) {
+      adaptiveScale.current = Math.max(0.25, adaptiveScale.current - 0.16);
+      slowFrames.current = 0;
+      fastFrames.current = 0;
+    } else if (delta > 1 / 25) {
       slowFrames.current += 1;
       fastFrames.current = 0;
       if (slowFrames.current >= 5) {
-        adaptiveScale.current = Math.max(0.52, adaptiveScale.current - 0.08);
+        adaptiveScale.current = Math.max(0.25, adaptiveScale.current - 0.08);
         slowFrames.current = 0;
       }
     } else if (delta < 1 / 48) {
@@ -143,11 +147,12 @@ export function GpuSurface({
       fastFrames.current = 0;
     }
 
-    const warmup = 0.42 + 0.58 * (warmupFrames.current / 48);
-    const scale = Math.min(warmup, adaptiveScale.current);
+    const warmupProgress = warmupFrames.current / 48;
+    const warmupSteps = 64 + (raySteps - 64) * warmupProgress;
+    const adaptiveSteps = raySteps * adaptiveScale.current;
     material.uniforms.uRaySteps.value = Math.min(
       raySteps,
-      Math.max(64, Math.round((raySteps * scale) / 8) * 8),
+      Math.max(64, Math.round(Math.min(warmupSteps, adaptiveSteps) / 8) * 8),
     );
   });
 
